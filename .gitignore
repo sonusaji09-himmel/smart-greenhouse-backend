@@ -1,0 +1,51 @@
+# ── Build output ─────────────────────────────────────────────────────────────
+bin/
+obj/
+
+# ── .NET runtime & tooling ────────────────────────────────────────────────────
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+*.DotSettings.user
+
+# ── ASP.NET Core secrets & environment ───────────────────────────────────────
+# Never commit real connection strings, API keys, or passwords
+appsettings.Production.json
+appsettings.Local.json
+secrets.json
+*.pfx
+*.key
+
+# ── NuGet packages ────────────────────────────────────────────────────────────
+# Packages are restored via dotnet restore — no need to commit them
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS generated files ───────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Rider / JetBrains ────────────────────────────────────────────────────────
+.idea/
+*.sln.iml
+
+# ── Test results ─────────────────────────────────────────────────────────────
+TestResults/
+coverage/
+*.coverage
+*.coveragexml

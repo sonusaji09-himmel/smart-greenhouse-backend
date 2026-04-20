@@ -75,7 +75,8 @@ export const createApp = (): Application => {
       success: true,
       data: {
         name: 'Smart Greenhouse API',
-        version: '1.0.0',
+        version: '2.0.0',
+        pipeline: 'ESP32 → MQTT → Backend → InfluxDB → API → React',
         docs: '/api-docs',
         api: apiBasePath,
       },

@@ -1,6 +1,6 @@
 import { SENSOR_THRESHOLDS } from '../../../constants/sensorThresholds';
 import type { DashboardOverview } from '../validators/dashboard.validator';
-import { sensorService } from './sensor.service';
+import { sensorQueryService } from './sensorQuery.service';
 import { evaluateSensorStatus } from './sensorStatus.service';
 
 /**
@@ -9,14 +9,15 @@ import { evaluateSensorStatus } from './sensorStatus.service';
  * which sensor, so controllers stay dumb.
  */
 export const dashboardService = {
-  async getOverview(): Promise<DashboardOverview | null> {
-    const latest = await sensorService.getLatestReading();
+  async getOverview(deviceId?: string): Promise<DashboardOverview | null> {
+    const latest = await sensorQueryService.latest({ deviceId });
 
     if (!latest) {
       return null;
     }
 
     return {
+      deviceId: latest.deviceId,
       temperature: {
         value: latest.temperature,
         unit: SENSOR_THRESHOLDS.temperature.unit,
@@ -37,7 +38,7 @@ export const dashboardService = {
         unit: SENSOR_THRESHOLDS.light.unit,
         status: evaluateSensorStatus(latest.lightLevel, SENSOR_THRESHOLDS.light),
       },
-      lastUpdated: latest.recordedAt.toISOString(),
+      lastUpdated: latest.recordedAt,
     };
   },
 };

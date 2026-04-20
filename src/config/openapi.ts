@@ -9,6 +9,13 @@ import { env } from './env';
  */
 export const openApiRegistry = new OpenAPIRegistry();
 
+openApiRegistry.registerComponent('securitySchemes', 'bearerAuth', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT',
+  description: 'JWT issued by `POST /auth/login`. Only required when `AUTH_ENABLED=true`.',
+});
+
 /**
  * Generates the final OpenAPI 3.1 document. Call this after all routes and
  * schemas have been registered (i.e. after route modules have been imported).
@@ -20,15 +27,11 @@ export const buildOpenApiDocument = () => {
     openapi: '3.1.0',
     info: {
       title: 'Smart Greenhouse API',
-      version: '1.0.0',
+      version: '2.0.0',
       description:
-        'Backend API for the Smart Greenhouse platform. Ingests sensor readings from ESP32 devices and serves an aggregated dashboard overview for the React frontend.',
-      contact: {
-        name: 'Smart Greenhouse Team',
-      },
-      license: {
-        name: 'MIT',
-      },
+        'Real-time IoT backend for the Smart Greenhouse platform. ESP32 devices publish telemetry over MQTT; the backend consumes, validates, and stores it in InfluxDB, and serves query and aggregation APIs to a React dashboard.',
+      contact: { name: 'Smart Greenhouse Team' },
+      license: { name: 'MIT' },
     },
     servers: [
       {
@@ -37,7 +40,8 @@ export const buildOpenApiDocument = () => {
       },
     ],
     tags: [
-      { name: 'Sensors', description: 'Sensor data ingestion endpoints' },
+      { name: 'Auth', description: 'Authentication and JWT issuance' },
+      { name: 'Sensors', description: 'Sensor ingestion, history, and aggregations' },
       { name: 'Dashboard', description: 'Aggregated dashboard endpoints' },
       { name: 'Health', description: 'Service health and liveness probes' },
     ],

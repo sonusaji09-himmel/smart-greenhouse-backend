@@ -1,20 +1,34 @@
 import type { Server } from 'node:http';
 import { createApp } from './app';
 import { env } from './config/env';
-import { connectDatabase, disconnectDatabase } from './config/database';
+import { connectInfluxDB, disconnectInfluxDB } from './config/influxdb';
 import { logger } from './config/logger';
+import { startMqttConsumer, stopMqttConsumer } from './mqtt/mqttConsumer';
+import { disconnectMqtt } from './mqtt/mqttClient';
+import { sensorIngestionService } from './api/v1/services/sensorIngestion.service';
 
 /**
  * Application entry point.
  *
  * Responsibilities:
- *   1. Open the database connection.
- *   2. Build the Express app.
- *   3. Start listening on the configured port.
- *   4. Wire graceful shutdown for SIGINT / SIGTERM and fatal errors.
+ *   1. Open the InfluxDB connection (fail fast on bad creds).
+ *   2. Start the MQTT consumer (never blocks on an unreachable broker;
+ *      it retries in the background).
+ *   3. Build the Express app and start listening.
+ *   4. Wire graceful shutdown: stop accepting HTTP, drain MQTT, flush the
+ *      InfluxDB write buffer, close sockets.
  */
 const bootstrap = async (): Promise<void> => {
-  await connectDatabase();
+  await connectInfluxDB();
+
+  // MQTT is best-effort at startup — if the broker is down the API must
+  // still come up so the dashboard keeps serving historical data. The
+  // consumer's auto-reconnect loop will catch up once the broker is back.
+  try {
+    await startMqttConsumer();
+  } catch (error) {
+    logger.error('MQTT consumer failed to start — continuing without it', error);
+  }
 
   const app = createApp();
   const server: Server = app.listen(env.PORT, () => {
@@ -31,15 +45,19 @@ const bootstrap = async (): Promise<void> => {
     server.close(async (err) => {
       if (err) {
         logger.error('Error while closing HTTP server', err);
-        process.exit(1);
       }
 
       try {
-        await disconnectDatabase();
+        await stopMqttConsumer().catch((e) => logger.warn('MQTT unsubscribe failed', e));
+        await disconnectMqtt().catch((e) => logger.warn('MQTT disconnect failed', e));
+        await sensorIngestionService
+          .flush()
+          .catch((e) => logger.warn('Final Influx flush failed', e));
+        await disconnectInfluxDB();
         logger.info('Shutdown complete');
-        process.exit(0);
+        process.exit(err ? 1 : 0);
       } catch (shutdownError) {
-        logger.error('Error during database shutdown', shutdownError);
+        logger.error('Error during shutdown', shutdownError);
         process.exit(1);
       }
     });

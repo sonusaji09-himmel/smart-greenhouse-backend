@@ -2,8 +2,8 @@ import { z } from './zodOpenApi';
 import { SENSOR_STATUS } from '../../../constants/sensorThresholds';
 
 /**
- * Shape of a single "sensor tile" on the dashboard: its most recent value,
- * the unit used to render it, and a pre-computed status bucket.
+ * A single "sensor tile" on the dashboard: its most recent value, the unit
+ * used to render it, and a pre-computed status bucket.
  */
 export const sensorSummarySchema = z
   .object({
@@ -17,10 +17,10 @@ export const sensorSummarySchema = z
 
 /**
  * Payload returned by `GET /dashboard/overview`.
- * Nullable fields account for the "no readings yet" state.
  */
 export const dashboardOverviewSchema = z
   .object({
+    deviceId: z.string().openapi({ example: 'esp32-01' }),
     temperature: sensorSummarySchema,
     humidity: sensorSummarySchema,
     soilMoisture: sensorSummarySchema,
@@ -39,5 +39,12 @@ export const dashboardOverviewResponseSchema = z
   })
   .openapi('DashboardOverviewResponse');
 
+export const dashboardOverviewQuerySchema = z
+  .object({
+    deviceId: z.string().trim().min(1).max(64).optional().openapi({ example: 'esp32-01' }),
+  })
+  .openapi('DashboardOverviewQuery');
+
 export type DashboardOverview = z.infer<typeof dashboardOverviewSchema>;
 export type SensorSummary = z.infer<typeof sensorSummarySchema>;
+export type DashboardOverviewQuery = z.infer<typeof dashboardOverviewQuerySchema>;

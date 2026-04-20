@@ -2,12 +2,13 @@ import { z } from './zodOpenApi';
 import { percentageSchema } from './common.validator';
 
 /**
- * Body schema for `POST /sensors/data`.
+ * Canonical shape of a sensor reading submitted by a device — either over
+ * MQTT (preferred) or via the HTTP fallback endpoint.
  *
- * Units and ranges mirror the ASP.NET contract so the ESP32 firmware can keep
- * sending the exact same payload.
+ * Units and ranges match the ESP32 firmware contract. An optional
+ * `messageId` enables de-duplication at the ingestion layer.
  */
-export const createSensorReadingSchema = z
+export const sensorReadingSchema = z
   .object({
     temperature: z
       .number({ message: 'Temperature is required' })
@@ -35,7 +36,7 @@ export const createSensorReadingSchema = z
       .openapi({
         description:
           'Optional ISO-8601 timestamp. If omitted, the server uses the current UTC time.',
-        example: '2026-04-15T10:30:00Z',
+        example: '2026-04-20T10:30:00Z',
       }),
 
     deviceId: z
@@ -45,19 +46,136 @@ export const createSensorReadingSchema = z
       .max(64)
       .optional()
       .openapi({ example: 'esp32-01', description: 'Source device identifier' }),
+
+    messageId: z.string().trim().min(1).max(128).optional().openapi({
+      example: 'esp32-01-00001734',
+      description:
+        'Optional idempotency key. Duplicate messageIds from the same device are dropped.',
+    }),
   })
   .strict()
-  .openapi('CreateSensorReadingRequest');
+  .openapi('SensorReading');
 
-export type CreateSensorReadingInput = z.infer<typeof createSensorReadingSchema>;
+export type SensorReadingInput = z.infer<typeof sensorReadingSchema>;
 
 export const createSensorReadingResponseSchema = z
   .object({
     success: z.literal(true),
     message: z.string(),
     data: z.object({
-      id: z.string(),
+      deviceId: z.string(),
       recordedAt: z.string().datetime({ offset: true }),
     }),
   })
   .openapi('CreateSensorReadingResponse');
+
+// ── Query schemas ──────────────────────────────────────────────────────────
+
+/**
+ * Flexible window spec accepted as either a string like `"1h"` / `"7d"` or
+ * an absolute from/to pair. Both routes normalise into a { start, stop }.
+ */
+export const timeRangeQuerySchema = z
+  .object({
+    deviceId: z.string().trim().min(1).max(64).optional().openapi({ example: 'esp32-01' }),
+    from: z.string().datetime({ offset: true }).optional().openapi({
+      description: 'Start of the query window (inclusive, ISO-8601).',
+      example: '2026-04-19T00:00:00Z',
+    }),
+    to: z.string().datetime({ offset: true }).optional().openapi({
+      description: 'End of the query window (exclusive, ISO-8601).',
+      example: '2026-04-20T00:00:00Z',
+    }),
+    window: z
+      .string()
+      .regex(/^\d+(ms|s|m|h|d|w)$/i, 'window must look like 30s / 15m / 1h / 7d')
+      .optional()
+      .openapi({
+        description:
+          'Relative window from "now" (e.g. "1h", "24h", "7d"). Ignored if `from` is set.',
+        example: '24h',
+      }),
+    limit: z.coerce.number().int().positive().max(10_000).default(1_000).openapi({ example: 500 }),
+  })
+  .openapi('SensorHistoryQuery');
+
+export type TimeRangeQuery = z.infer<typeof timeRangeQuerySchema>;
+
+export const aggregateQuerySchema = timeRangeQuerySchema
+  .extend({
+    every: z
+      .string()
+      .regex(/^\d+(ms|s|m|h|d|w)$/i, 'every must look like 1m / 15m / 1h / 1d')
+      .default('5m')
+      .openapi({ description: 'Bucket width for aggregation', example: '15m' }),
+    fn: z
+      .enum(['mean', 'min', 'max', 'median', 'sum', 'last'])
+      .default('mean')
+      .openapi({ description: 'Aggregation function applied per bucket', example: 'mean' }),
+  })
+  .openapi('SensorAggregateQuery');
+
+export type AggregateQuery = z.infer<typeof aggregateQuerySchema>;
+
+export const latestQuerySchema = z
+  .object({
+    deviceId: z.string().trim().min(1).max(64).optional().openapi({ example: 'esp32-01' }),
+  })
+  .openapi('SensorLatestQuery');
+
+export type LatestQuery = z.infer<typeof latestQuerySchema>;
+
+// ── Response schemas ──────────────────────────────────────────────────────
+
+const sensorReadingPointSchema = z
+  .object({
+    deviceId: z.string().openapi({ example: 'esp32-01' }),
+    temperature: z.number().openapi({ example: 24.5 }),
+    humidity: z.number().openapi({ example: 62 }),
+    soilMoisture: z.number().openapi({ example: 38 }),
+    lightLevel: z.number().openapi({ example: 850 }),
+    recordedAt: z.string().datetime({ offset: true }),
+  })
+  .openapi('SensorReadingPoint');
+
+export const sensorLatestResponseSchema = z
+  .object({
+    success: z.literal(true),
+    data: z.union([sensorReadingPointSchema, z.null()]),
+  })
+  .openapi('SensorLatestResponse');
+
+export const sensorHistoryResponseSchema = z
+  .object({
+    success: z.literal(true),
+    data: z.object({
+      count: z.number().int().nonnegative(),
+      points: z.array(sensorReadingPointSchema),
+    }),
+  })
+  .openapi('SensorHistoryResponse');
+
+const aggregateBucketSchema = z
+  .object({
+    time: z.string().datetime({ offset: true }),
+    temperature: z.number().nullable(),
+    humidity: z.number().nullable(),
+    soilMoisture: z.number().nullable(),
+    lightLevel: z.number().nullable(),
+  })
+  .openapi('SensorAggregateBucket');
+
+export const sensorAggregateResponseSchema = z
+  .object({
+    success: z.literal(true),
+    data: z.object({
+      fn: z.string(),
+      every: z.string(),
+      count: z.number().int().nonnegative(),
+      buckets: z.array(aggregateBucketSchema),
+    }),
+  })
+  .openapi('SensorAggregateResponse');
+
+export type SensorReadingPoint = z.infer<typeof sensorReadingPointSchema>;
+export type SensorAggregateBucket = z.infer<typeof aggregateBucketSchema>;

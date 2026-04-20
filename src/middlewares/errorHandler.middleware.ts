@@ -1,6 +1,5 @@
 import type { ErrorRequestHandler } from 'express';
 import { StatusCodes, getReasonPhrase } from 'http-status-codes';
-import mongoose from 'mongoose';
 import { ZodError } from 'zod';
 import { AppError } from '../utils/AppError';
 import { logger } from '../config/logger';
@@ -37,37 +36,23 @@ const normalize = (err: unknown): NormalizedError => {
     };
   }
 
-  if (err instanceof mongoose.Error.ValidationError) {
-    return {
-      statusCode: StatusCodes.BAD_REQUEST,
-      code: 'DB_VALIDATION_ERROR',
-      message: 'Database validation failed',
-      details: Object.values(err.errors).map((e) => ({
-        path: e.path,
-        message: e.message,
-      })),
-    };
-  }
-
-  if (err instanceof mongoose.Error.CastError) {
-    return {
-      statusCode: StatusCodes.BAD_REQUEST,
-      code: 'INVALID_IDENTIFIER',
-      message: `Invalid value for "${err.path}"`,
-    };
-  }
-
+  // InfluxDB client surfaces HttpError with .statusCode + .body on network /
+  // auth failures. Keep the 5xx-ish ones as 502 Bad Gateway so the client
+  // can tell "upstream is sick" apart from "your request is malformed".
   if (
     err &&
     typeof err === 'object' &&
-    'code' in err &&
-    (err as { code?: number }).code === 11000
+    'statusCode' in err &&
+    typeof (err as { statusCode: unknown }).statusCode === 'number'
   ) {
-    return {
-      statusCode: StatusCodes.CONFLICT,
-      code: 'DUPLICATE_KEY',
-      message: 'Resource already exists',
-    };
+    const upstream = err as { statusCode: number; message?: string };
+    if (upstream.statusCode >= 500) {
+      return {
+        statusCode: StatusCodes.BAD_GATEWAY,
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: upstream.message ?? 'Upstream data store is unavailable',
+      };
+    }
   }
 
   return {

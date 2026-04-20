@@ -1,7 +1,7 @@
 {
   "name": "smart-greenhouse-api",
-  "version": "1.0.0",
-  "description": "Smart Greenhouse backend API — Node.js + Express + TypeScript + MongoDB",
+  "version": "2.0.0",
+  "description": "Smart Greenhouse backend — Node.js + Express + TypeScript + MQTT + InfluxDB real-time IoT pipeline",
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.json",
     "start": "node dist/server.js",
@@ -23,6 +23,8 @@
   "homepage": "https://github.com/akashca-pro/smart-greenhouse#readme",
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@influxdata/influxdb-client": "^1.35.0",
+    "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -30,17 +32,20 @@
     "express-rate-limit": "^8.3.2",
     "helmet": "^8.1.0",
     "http-status-codes": "^2.3.0",
-    "mongoose": "^9.4.1",
+    "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "mqtt": "^5.15.1",
     "swagger-ui-express": "^5.0.1",
     "winston": "^3.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
     "@types/node": "^25.6.0",
     "@types/swagger-ui-express": "^4.1.8",

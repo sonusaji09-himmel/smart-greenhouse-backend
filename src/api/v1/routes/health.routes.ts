@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import mongoose from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import { z } from '../validators/zodOpenApi';
 import { openApiRegistry } from '../../../config/openapi';
+import { isInfluxHealthy } from '../../../config/influxdb';
+import { isMqttConnected } from '../../../mqtt/mqttClient';
 
 const router = Router();
 
@@ -12,30 +13,25 @@ const healthResponseSchema = z
     data: z.object({
       status: z.enum(['ok', 'degraded']),
       uptimeSeconds: z.number(),
-      database: z.enum(['connected', 'connecting', 'disconnected']),
+      influxdb: z.enum(['connected', 'disconnected']),
+      mqtt: z.enum(['connected', 'disconnected']),
       timestamp: z.string().datetime({ offset: true }),
     }),
   })
   .openapi('HealthResponse');
 
-const DB_STATE = {
-  0: 'disconnected',
-  1: 'connected',
-  2: 'connecting',
-  3: 'disconnected',
-} as const;
-
 router.get('/', (_req, res) => {
-  const readyState = mongoose.connection.readyState as keyof typeof DB_STATE;
-  const dbStatus = DB_STATE[readyState] ?? 'disconnected';
-  const isHealthy = dbStatus === 'connected';
+  const influxStatus = isInfluxHealthy() ? 'connected' : 'disconnected';
+  const mqttStatus = isMqttConnected() ? 'connected' : 'disconnected';
+  const isHealthy = influxStatus === 'connected';
 
   res.status(isHealthy ? StatusCodes.OK : StatusCodes.SERVICE_UNAVAILABLE).json({
     success: true,
     data: {
       status: isHealthy ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
-      database: dbStatus,
+      influxdb: influxStatus,
+      mqtt: mqttStatus,
       timestamp: new Date().toISOString(),
     },
   });
@@ -46,14 +42,15 @@ openApiRegistry.registerPath({
   path: '/health',
   tags: ['Health'],
   summary: 'Service health probe',
-  description: 'Reports API liveness and MongoDB connectivity. Suitable for load-balancer checks.',
+  description:
+    'Reports API liveness, InfluxDB connectivity, and MQTT broker connectivity. Suitable for load-balancer checks.',
   responses: {
     200: {
       description: 'Service is healthy',
       content: { 'application/json': { schema: healthResponseSchema } },
     },
     503: {
-      description: 'Service is degraded (e.g. DB disconnected)',
+      description: 'Service is degraded (e.g. InfluxDB unreachable)',
       content: { 'application/json': { schema: healthResponseSchema } },
     },
   },

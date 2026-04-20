@@ -1,116 +1,229 @@
 # Smart Greenhouse — Backend API
 
-A backend system that receives sensor data from an ESP32, stores it in MongoDB, and serves it to a React dashboard over HTTP.
+A production-grade Node.js + Express + TypeScript backend that ingests sensor data from an ESP32, persists it in MongoDB, and serves an aggregated overview (with computed optimal/warning/critical status) to a React dashboard.
 
 ---
 
 ## How It Works
 
 ```
-ESP32 (sensors)  →  POST /api/sensors/data  →  Backend  →  MongoDB
-React Dashboard  ←  GET  /api/dashboard/overview  ←  Backend  ←  MongoDB
+ESP32 (sensors)  →  POST /api/v1/sensors/data      →  Backend  →  MongoDB
+React Dashboard  ←  GET  /api/v1/dashboard/overview ←  Backend  ←  MongoDB
 ```
 
-- The ESP32 sends temperature, humidity, soil moisture, and light readings every ~30 seconds
-- The backend stores them in MongoDB and computes a status (optimal / warning / critical)
-- The React frontend polls the dashboard endpoint to display live data
+- The ESP32 sends temperature, humidity, soil moisture, and light readings every ~30 seconds.
+- The backend validates, stores, and serves them with a computed status.
+- The React frontend polls the dashboard endpoint every ~10 seconds to display live data.
 
 ---
 
 ## Tech Stack
 
-| Layer    | Technology              |
-|----------|-------------------------|
-| Backend  | ASP.NET Core 8 Web API  |
-| Database | MongoDB                 |
-| Device   | ESP32 (HTTP POST)       |
-| Frontend | React (separate repo)   |
+| Layer              | Technology                                               |
+| ------------------ | -------------------------------------------------------- |
+| Runtime            | Node.js ≥ 20                                             |
+| Language           | TypeScript 5                                             |
+| Framework          | Express 5                                                |
+| Database           | MongoDB (Mongoose ODM)                                   |
+| Validation         | Zod                                                      |
+| API Docs           | OpenAPI 3.1 via `@asteasolutions/zod-to-openapi` + Swagger UI |
+| Logging            | Winston + Morgan                                         |
+| Security           | Helmet, CORS, express-rate-limit                         |
+| Dev Tooling        | tsx, ESLint (flat config), Prettier, rimraf              |
 
 ---
 
-## Setup Guide
+## Architecture
 
-Follow the steps below for your operating system. Do them in order.
+The project follows a strict MVC-style layering, organized by feature and API version so it scales cleanly to many resources:
+
+```
+src/
+├── app.ts                               ← Express app factory (middleware chain)
+├── server.ts                            ← Entry point (bootstrap, shutdown)
+├── config/
+│   ├── env.ts                           ← Zod-validated environment loader
+│   ├── database.ts                      ← Mongoose connection + lifecycle
+│   ├── logger.ts                        ← Winston logger + morgan stream
+│   └── openapi.ts                       ← Central OpenAPI registry + generator
+├── constants/
+│   └── sensorThresholds.ts              ← Sensor ranges, units, status literals
+├── middlewares/
+│   ├── errorHandler.middleware.ts       ← Global error → ErrorEnvelope JSON
+│   ├── notFound.middleware.ts           ← 404 → AppError forwarder
+│   ├── requestLogger.middleware.ts      ← morgan → winston pipe
+│   └── validate.middleware.ts           ← Zod request validator factory
+├── utils/
+│   ├── ApiResponse.ts                   ← success/error envelope types
+│   ├── AppError.ts                      ← Typed operational errors
+│   └── asyncHandler.ts                  ← async → next(err) adapter
+└── api/
+    └── v1/
+        ├── controllers/                 ← HTTP I/O only (no business logic)
+        │   ├── sensor.controller.ts
+        │   └── dashboard.controller.ts
+        ├── services/                    ← Business logic (pure, testable)
+        │   ├── sensor.service.ts
+        │   ├── dashboard.service.ts
+        │   └── sensorStatus.service.ts
+        ├── models/                      ← Mongoose schemas / data layer
+        │   └── sensorReading.model.ts
+        ├── validators/                  ← Zod schemas (shared with OpenAPI)
+        │   ├── zodOpenApi.ts
+        │   ├── common.validator.ts
+        │   ├── sensor.validator.ts
+        │   └── dashboard.validator.ts
+        └── routes/                      ← Route wiring + OpenAPI registration
+            ├── index.ts
+            ├── health.routes.ts
+            ├── sensor.routes.ts
+            └── dashboard.routes.ts
+```
+
+### Separation of concerns
+
+- **Controllers** only deal with the HTTP cycle: parse the request (already validated by middleware), delegate to a service, shape the response.
+- **Services** own all business logic. They are the only layer that may talk to models.
+- **Models** describe the data shape and persistence rules. They expose typed documents via Mongoose.
+- **Validators** are Zod schemas that do double duty: runtime validation of `body` / `query` / `params` and auto-generated OpenAPI documentation. One source of truth.
+- **Middlewares** handle cross-cutting concerns: security headers, CORS, compression, rate limiting, logging, validation, 404, and centralized error handling.
+- **Config** encapsulates environment, logger, database, and the OpenAPI registry.
+
+### API versioning
+
+All routes are mounted under `${API_PREFIX}/${API_VERSION}` (default `/api/v1`). Adding a `v2` is a matter of introducing `src/api/v2/...` and mounting a second router — no existing code changes.
 
 ---
 
-## Mac — Full Setup from Zero
+## Setup
 
-### Step 1 — Install Homebrew (if not already installed)
+### Prerequisites
 
-Open **Terminal** and run:
+- Node.js ≥ 20
+- npm ≥ 10
+- MongoDB running locally (or reachable via `MONGODB_URI`)
+
+### Install & configure
+
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+npm install
+cp .env.example .env
+# (edit .env if needed)
 ```
 
-Skip this step if you already have Homebrew (`brew --version` to check).
+### Scripts
+
+| Command             | Purpose                                              |
+| ------------------- | ---------------------------------------------------- |
+| `npm run dev`       | Start with `tsx watch` (auto-reload)                 |
+| `npm run build`     | Compile TypeScript to `dist/`                        |
+| `npm start`         | Run the compiled app from `dist/`                    |
+| `npm run typecheck` | Run `tsc --noEmit`                                   |
+| `npm run lint`      | Run ESLint (flat config)                             |
+| `npm run format`    | Run Prettier                                         |
+
+### Start the server
+
+Development:
+
+```bash
+npm run dev
+```
+
+Production:
+
+```bash
+npm run build
+npm start
+```
+
+The API is available at `http://localhost:5000`.
 
 ---
 
-### Step 2 — Install .NET 8 SDK
+## Configuration
 
-```bash
-brew install --cask dotnet-sdk
-```
+All configuration is loaded via `dotenv` and validated with Zod on startup — invalid or missing values cause a clear startup error.
 
-Verify the installation:
-```bash
-dotnet --version
-```
-You should see `8.x.x`. If you do, .NET is ready.
-
----
-
-### Step 3 — Install MongoDB
-
-```bash
-brew tap mongodb/brew
-brew install mongodb-community
-```
+| Variable               | Default                                           | Description                              |
+| ---------------------- | ------------------------------------------------- | ---------------------------------------- |
+| `NODE_ENV`             | `development`                                     | One of `development`, `test`, `production` |
+| `PORT`                 | `5000`                                            | HTTP port                                |
+| `API_PREFIX`           | `/api`                                            | Base path prefix                         |
+| `API_VERSION`          | `v1`                                              | Version segment                          |
+| `MONGODB_URI`          | —                                                 | Connection string (required)             |
+| `MONGODB_DATABASE`     | —                                                 | Database name (required)                 |
+| `CORS_ORIGINS`         | `http://localhost:3000,http://localhost:5173`     | Comma-separated allowed origins          |
+| `LOG_LEVEL`            | `info`                                            | `error` / `warn` / `info` / `http` / `debug` |
+| `RATE_LIMIT_WINDOW_MS` | `60000`                                           | Rate-limit window                        |
+| `RATE_LIMIT_MAX`       | `120`                                             | Max requests per window per IP           |
 
 ---
 
-### Step 4 — Start MongoDB
+## API
 
-```bash
-brew services start mongodb-community
+### Base URL
+
+```
+http://localhost:5000/api/v1
 ```
 
-Verify MongoDB is running:
-```bash
-brew services list
-```
-You should see `mongodb-community` with status `started`.
+### Endpoints
+
+| Method | Endpoint              | Called By | Description                                   |
+| ------ | --------------------- | --------- | --------------------------------------------- |
+| GET    | `/health`             | Ops       | Liveness + DB connectivity probe              |
+| POST   | `/sensors/data`       | ESP32     | Ingest a sensor reading                       |
+| GET    | `/dashboard/overview` | React     | Latest reading with computed per-sensor status |
+
+### Interactive documentation
+
+Swagger UI: [`http://localhost:5000/api-docs`](http://localhost:5000/api-docs)
+
+Raw OpenAPI 3.1 JSON: [`http://localhost:5000/api-docs.json`](http://localhost:5000/api-docs.json)
+
+The spec is auto-generated from the same Zod schemas used for request validation, so docs can never drift out of sync with the real contract.
 
 ---
 
-### Step 5 — Run the Backend
+## Response Envelopes
 
-Navigate to the project folder and start the server:
-```bash
-cd /path/to/smart-greenhouse/SmartGreenhouse.API
-dotnet restore
-dotnet run
+Every endpoint returns a consistent shape.
+
+### Success
+
+```json
+{
+  "success": true,
+  "message": "Optional human-readable context",
+  "data": { /* endpoint-specific payload */ }
+}
 ```
 
-> Replace `/path/to/smart-greenhouse` with the actual folder location on your machine.
+### Error
 
-You should see output like:
-```
-info: Now listening on: http://localhost:5000
+```json
+{
+  "success": false,
+  "message": "Request validation failed",
+  "code": "VALIDATION_ERROR",
+  "statusCode": 400,
+  "details": [
+    { "path": "body.temperature", "message": "Temperature is required", "code": "invalid_type" }
+  ]
+}
 ```
 
-The API is now running at `http://localhost:5000`.
+`details` carries validation issues, Mongoose errors, or any structured context provided when the `AppError` was thrown.
 
 ---
 
-### Step 6 — Test It (Mac)
+## Example Requests
 
-Open a **new Terminal tab** and run:
+### Ingest a reading (simulate the ESP32)
 
-**Send a sensor reading (simulates the ESP32):**
 ```bash
-curl -X POST http://localhost:5000/api/sensors/data \
+curl -X POST http://localhost:5000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{
     "temperature": 24.5,
@@ -120,165 +233,55 @@ curl -X POST http://localhost:5000/api/sensors/data \
   }'
 ```
 
-Expected response:
-```json
-{ "message": "Data received successfully." }
-```
-
-**Get the dashboard (simulates React):**
-```bash
-curl http://localhost:5000/api/dashboard/overview
-```
-
-Expected response:
 ```json
 {
-  "temperature":  { "value": 24.5,  "unit": "°C",  "status": "optimal" },
-  "humidity":     { "value": 62.0,  "unit": "%",   "status": "optimal" },
-  "soilMoisture": { "value": 38.0,  "unit": "%",   "status": "warning" },
-  "light":        { "value": 850.0, "unit": "lux", "status": "optimal" },
-  "lastUpdated":  "2026-04-15T10:30:00Z"
+  "success": true,
+  "message": "Data received successfully.",
+  "data": {
+    "id": "66230f8d9a1b2c3d4e5f6789",
+    "recordedAt": "2026-04-20T10:30:00.000Z"
+  }
 }
 ```
 
----
+### Fetch the dashboard overview
 
-## Windows — Full Setup from Zero
-
-### Step 1 — Install .NET 8 SDK
-
-1. Go to: https://dotnet.microsoft.com/en-us/download/dotnet/8.0
-2. Under **.NET 8.0**, click **Download .NET SDK x64** (Windows Installer)
-3. Run the downloaded `.exe` file and follow the installer
-4. When done, open **Command Prompt** and verify:
-
-```cmd
-dotnet --version
-```
-You should see `8.x.x`. If you do, .NET is ready.
-
----
-
-### Step 2 — Install MongoDB
-
-1. Go to: https://www.mongodb.com/try/download/community
-2. Select **Version: 7.x**, **Platform: Windows**, **Package: MSI**
-3. Click **Download** and run the installer
-4. During install, keep **"Install MongoDB as a Service"** checked — this means MongoDB starts automatically with Windows
-
-Verify MongoDB is installed:
-```cmd
-mongod --version
-```
-
----
-
-### Step 3 — Start MongoDB
-
-If MongoDB was installed as a service (default), it is already running.
-
-To start it manually (open **Command Prompt as Administrator**):
-```cmd
-net start MongoDB
-```
-
-To verify it is running:
-```cmd
-sc query MongoDB
-```
-Look for `STATE: RUNNING`.
-
----
-
-### Step 4 — Run the Backend
-
-Open **Command Prompt** or **PowerShell** and run:
-```cmd
-cd C:\path\to\smart-greenhouse\SmartGreenhouse.API
-dotnet restore
-dotnet run
-```
-
-> Replace `C:\path\to\smart-greenhouse` with the actual folder location on your machine.
-
-You should see:
-```
-info: Now listening on: http://localhost:5000
-```
-
-The API is now running at `http://localhost:5000`.
-
----
-
-### Step 5 — Test It (Windows)
-
-Open a **new PowerShell window** and run:
-
-**Send a sensor reading (simulates the ESP32):**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:5000/api/sensors/data" `
-  -Method POST `
-  -ContentType "application/json" `
-  -Body '{
-    "temperature": 24.5,
-    "humidity": 62.0,
-    "soilMoisture": 38.0,
-    "lightLevel": 850.0
-  }'
-```
-
-Expected response:
-```
-message
--------
-Data received successfully.
-```
-
-**Get the dashboard (simulates React):**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard/overview" -Method GET
-```
-
----
-
-## Demo — Show All Three Statuses to Your Team
-
-Run these back-to-back to show critical → warning → optimal in action.
-
-### Mac / Linux
 ```bash
-# 1. Critical — everything out of range
-curl -X POST http://localhost:5000/api/sensors/data \
+curl http://localhost:5000/api/v1/dashboard/overview
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "temperature":  { "value": 24.5,  "unit": "°C",  "status": "optimal" },
+    "humidity":     { "value": 62.0,  "unit": "%",   "status": "optimal" },
+    "soilMoisture": { "value": 38.0,  "unit": "%",   "status": "warning" },
+    "light":        { "value": 850.0, "unit": "lux", "status": "optimal" },
+    "lastUpdated":  "2026-04-20T10:30:00.000Z"
+  }
+}
+```
+
+### Demo — trigger each status bucket
+
+```bash
+# Critical — out of range everywhere
+curl -X POST http://localhost:5000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":42.0,"humidity":15.0,"soilMoisture":10.0,"lightLevel":100.0}'
-curl http://localhost:5000/api/dashboard/overview
 
-# 2. Warning — values outside optimal but not dangerous
-curl -X POST http://localhost:5000/api/sensors/data \
+# Warning — outside optimal but inside operational bounds
+curl -X POST http://localhost:5000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":30.0,"humidity":45.0,"soilMoisture":35.0,"lightLevel":400.0}'
-curl http://localhost:5000/api/dashboard/overview
 
-# 3. Optimal — everything in range
-curl -X POST http://localhost:5000/api/sensors/data \
+# Optimal — all nominal
+curl -X POST http://localhost:5000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":22.0,"humidity":60.0,"soilMoisture":55.0,"lightLevel":1000.0}'
-curl http://localhost:5000/api/dashboard/overview
-```
 
-### Windows (PowerShell)
-```powershell
-# 1. Critical
-Invoke-RestMethod -Uri "http://localhost:5000/api/sensors/data" -Method POST -ContentType "application/json" -Body '{"temperature":42.0,"humidity":15.0,"soilMoisture":10.0,"lightLevel":100.0}'
-Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard/overview"
-
-# 2. Warning
-Invoke-RestMethod -Uri "http://localhost:5000/api/sensors/data" -Method POST -ContentType "application/json" -Body '{"temperature":30.0,"humidity":45.0,"soilMoisture":35.0,"lightLevel":400.0}'
-Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard/overview"
-
-# 3. Optimal
-Invoke-RestMethod -Uri "http://localhost:5000/api/sensors/data" -Method POST -ContentType "application/json" -Body '{"temperature":22.0,"humidity":60.0,"soilMoisture":55.0,"lightLevel":1000.0}'
-Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard/overview"
+curl http://localhost:5000/api/v1/dashboard/overview
 ```
 
 ---
@@ -286,68 +289,35 @@ Invoke-RestMethod -Uri "http://localhost:5000/api/dashboard/overview"
 ## Threshold Reference
 
 | Sensor        | Unit | Critical Low | Warning Low | Optimal Range | Warning High | Critical High |
-|---------------|------|-------------|-------------|---------------|-------------|---------------|
-| Temperature   | °C   | < 10        | 10 – 18     | 18 – 28       | 28 – 40     | > 40          |
-| Humidity      | %    | < 20        | 20 – 50     | 50 – 75       | 75 – 90     | > 90          |
-| Soil Moisture | %    | < 20        | 20 – 40     | 40 – 70       | 70 – 90     | > 90          |
-| Light         | lux  | < 200       | 200 – 500   | 500 – 2000    | 2000 – 5000 | > 5000        |
+| ------------- | ---- | ------------ | ----------- | ------------- | ------------ | ------------- |
+| Temperature   | °C   | < 10         | 10 – 18     | 18 – 28       | 28 – 40      | > 40          |
+| Humidity      | %    | < 20         | 20 – 50     | 50 – 75       | 75 – 90      | > 90          |
+| Soil Moisture | %    | < 20         | 20 – 40     | 40 – 70       | 70 – 90      | > 90          |
+| Light         | lux  | < 200        | 200 – 500   | 500 – 2000    | 2000 – 5000  | > 5000        |
+
+Thresholds live in `src/constants/sensorThresholds.ts` and are consumed by `sensorStatus.service.ts`. They can be moved to a DB-backed settings service later without touching controllers.
 
 ---
 
-## API Endpoints
+## Best Practices Baked In
 
-| Method | Endpoint                  | Called By | Description                    |
-|--------|---------------------------|-----------|--------------------------------|
-| POST   | `/api/sensors/data`       | ESP32     | Submit a sensor reading        |
-| GET    | `/api/dashboard/overview` | React     | Get latest reading with status |
-
----
-
-## Configuration
-
-MongoDB connection is configured in `appsettings.json`:
-
-```json
-{
-  "MongoDB": {
-    "ConnectionString": "mongodb://localhost:27017",
-    "DatabaseName": "smart_greenhouse"
-  }
-}
-```
-
-Change `ConnectionString` if MongoDB is running on a different machine or port.
+- **Fail-fast config:** Zod-validated env; missing / malformed variables kill the process with a clear message.
+- **DRY validation + docs:** the same Zod schema backs request validation and OpenAPI generation.
+- **Uniform responses:** all successes go through `success(...)`, all errors through a single handler.
+- **Typed errors:** `AppError` with factory helpers (`badRequest`, `notFound`, `conflict`, ...).
+- **Async hygiene:** `asyncHandler` removes try/catch noise; unhandled rejections and uncaught exceptions are logged and trigger graceful shutdown.
+- **Security:** Helmet, configurable CORS allowlist, global rate limiting, and a 1 MB JSON body cap.
+- **Observability:** Winston with env-aware formatters; morgan HTTP logs streamed into Winston.
+- **Graceful shutdown:** SIGINT/SIGTERM drain the HTTP server, close Mongo, and exit within a hard 10 s ceiling.
+- **Scalable layout:** per-version API tree (`src/api/v1/...`) with controllers / services / models / validators / routes split by feature.
 
 ---
 
-## Project Structure
+## Roadmap
 
-```
-SmartGreenhouse.API/
-├── Controllers/
-│   ├── SensorController.cs       ← POST /api/sensors/data
-│   └── DashboardController.cs    ← GET  /api/dashboard/overview
-├── Models/
-│   └── SensorReading.cs          ← MongoDB document shape
-├── DTOs/
-│   ├── SensorReadingInputDto.cs  ← What ESP32 sends
-│   └── DashboardOverviewDto.cs   ← What React receives
-├── Services/
-│   ├── SensorService.cs          ← Save + retrieve readings
-│   └── SensorStatusEvaluator.cs  ← optimal / warning / critical logic
-├── Data/
-│   ├── MongoDbContext.cs          ← MongoDB connection + collections
-│   └── MongoDbSettings.cs        ← Config model
-├── Program.cs                    ← App setup, DI, CORS
-└── appsettings.json              ← MongoDB connection string
-```
-
----
-
-## What's Next (Not Yet Built)
-
-- `GET /api/dashboard/trends` — 24h trend data for charts
-- `GET /api/environment/current` — detailed values with threshold ranges
-- `POST /api/devices/control` — turn pump / lights / ventilation on or off
-- `GET /api/devices/commands` — ESP32 polls for pending commands
-- `GET /api/alerts` — list of triggered alerts
+- `GET /dashboard/trends` — 24h rolling data for charts
+- `GET /environment/current` — detailed values with live threshold ranges
+- `POST /devices/control` — actuate pump / lights / ventilation
+- `GET /devices/commands` — ESP32 polls for pending commands
+- `GET /alerts` — alert history
+- Automated tests (Vitest + Supertest) and CI pipeline

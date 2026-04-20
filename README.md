@@ -137,7 +137,7 @@ npm run build
 npm start
 ```
 
-The API is available at `http://localhost:5000`.
+The API is available at `http://localhost:8000`.
 
 ---
 
@@ -148,7 +148,7 @@ All configuration is loaded via `dotenv` and validated with Zod on startup — i
 | Variable               | Default                                           | Description                              |
 | ---------------------- | ------------------------------------------------- | ---------------------------------------- |
 | `NODE_ENV`             | `development`                                     | One of `development`, `test`, `production` |
-| `PORT`                 | `5000`                                            | HTTP port                                |
+| `PORT`                 | `8000`                                            | HTTP port                                |
 | `API_PREFIX`           | `/api`                                            | Base path prefix                         |
 | `API_VERSION`          | `v1`                                              | Version segment                          |
 | `MONGODB_URI`          | —                                                 | Connection string (required)             |
@@ -165,7 +165,7 @@ All configuration is loaded via `dotenv` and validated with Zod on startup — i
 ### Base URL
 
 ```
-http://localhost:5000/api/v1
+http://localhost:8000/api/v1
 ```
 
 ### Endpoints
@@ -178,9 +178,9 @@ http://localhost:5000/api/v1
 
 ### Interactive documentation
 
-Swagger UI: [`http://localhost:5000/api-docs`](http://localhost:5000/api-docs)
+Swagger UI: [`http://localhost:8000/api-docs`](http://localhost:8000/api-docs)
 
-Raw OpenAPI 3.1 JSON: [`http://localhost:5000/api-docs.json`](http://localhost:5000/api-docs.json)
+Raw OpenAPI 3.1 JSON: [`http://localhost:8000/api-docs.json`](http://localhost:8000/api-docs.json)
 
 The spec is auto-generated from the same Zod schemas used for request validation, so docs can never drift out of sync with the real contract.
 
@@ -223,7 +223,7 @@ Every endpoint returns a consistent shape.
 ### Ingest a reading (simulate the ESP32)
 
 ```bash
-curl -X POST http://localhost:5000/api/v1/sensors/data \
+curl -X POST http://localhost:8000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{
     "temperature": 24.5,
@@ -247,7 +247,7 @@ curl -X POST http://localhost:5000/api/v1/sensors/data \
 ### Fetch the dashboard overview
 
 ```bash
-curl http://localhost:5000/api/v1/dashboard/overview
+curl http://localhost:8000/api/v1/dashboard/overview
 ```
 
 ```json
@@ -267,21 +267,21 @@ curl http://localhost:5000/api/v1/dashboard/overview
 
 ```bash
 # Critical — out of range everywhere
-curl -X POST http://localhost:5000/api/v1/sensors/data \
+curl -X POST http://localhost:8000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":42.0,"humidity":15.0,"soilMoisture":10.0,"lightLevel":100.0}'
 
 # Warning — outside optimal but inside operational bounds
-curl -X POST http://localhost:5000/api/v1/sensors/data \
+curl -X POST http://localhost:8000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":30.0,"humidity":45.0,"soilMoisture":35.0,"lightLevel":400.0}'
 
 # Optimal — all nominal
-curl -X POST http://localhost:5000/api/v1/sensors/data \
+curl -X POST http://localhost:8000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
   -d '{"temperature":22.0,"humidity":60.0,"soilMoisture":55.0,"lightLevel":1000.0}'
 
-curl http://localhost:5000/api/v1/dashboard/overview
+curl http://localhost:8000/api/v1/dashboard/overview
 ```
 
 ---

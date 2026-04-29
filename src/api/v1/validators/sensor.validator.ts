@@ -29,6 +29,10 @@ export const sensorReadingSchema = z
       .max(100_000, 'Light level must be between 0 and 100,000 lux')
       .openapi({ example: 850, description: 'Ambient light in lux' }),
 
+    waterLevel: percentageSchema
+      .optional()
+      .openapi({ example: 75, description: 'Water tank level (%)' }),
+
     timestamp: z
       .string()
       .datetime({ offset: true, message: 'Timestamp must be ISO-8601' })
@@ -134,6 +138,7 @@ const sensorReadingPointSchema = z
     humidity: z.number().openapi({ example: 62 }),
     soilMoisture: z.number().openapi({ example: 38 }),
     lightLevel: z.number().openapi({ example: 850 }),
+    waterLevel: z.number().optional().openapi({ example: 75 }),
     recordedAt: z.string().datetime({ offset: true }),
   })
   .openapi('SensorReadingPoint');
@@ -162,6 +167,7 @@ const aggregateBucketSchema = z
     humidity: z.number().nullable(),
     soilMoisture: z.number().nullable(),
     lightLevel: z.number().nullable(),
+    waterLevel: z.number().nullable().optional(),
   })
   .openapi('SensorAggregateBucket');
 

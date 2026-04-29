@@ -43,6 +43,7 @@ const rowToPoint = (row: Record<string, unknown>): SensorReadingPoint => ({
   humidity: Number(row.humidity ?? 0),
   soilMoisture: Number(row.soilMoisture ?? 0),
   lightLevel: Number(row.lightLevel ?? 0),
+  waterLevel: row.waterLevel === undefined ? undefined : Number(row.waterLevel),
   recordedAt: new Date(String(row._time)).toISOString(),
 });
 
@@ -58,6 +59,7 @@ const rowToBucket = (row: Record<string, unknown>): SensorAggregateBucket => {
     humidity: numberOrNull(row.humidity),
     soilMoisture: numberOrNull(row.soilMoisture),
     lightLevel: numberOrNull(row.lightLevel),
+    waterLevel: numberOrNull(row.waterLevel),
   };
 };
 

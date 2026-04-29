@@ -2,6 +2,8 @@ import { Point } from '@influxdata/influxdb-client';
 import { env } from '../../../config/env';
 import { getWriteApi } from '../../../config/influxdb';
 import { logger } from '../../../config/logger';
+import { automationEngineService } from './automationEngine.service';
+import { sseEmitterService } from './sseEmitter.service';
 import type { SensorReadingInput } from '../validators/sensor.validator';
 
 /**
@@ -70,11 +72,30 @@ export const sensorIngestionService = {
       .floatField('lightLevel', input.lightLevel)
       .timestamp(recordedAt);
 
+    if (typeof input.waterLevel === 'number') {
+      point.floatField('waterLevel', input.waterLevel);
+    }
+
     getWriteApi().writePoint(point);
 
     logger.debug('Queued sensor reading for Influx write', {
       deviceId,
       recordedAt: recordedAt.toISOString(),
+    });
+
+    await automationEngineService.handleReading(input, deviceId, recordedAt.toISOString());
+
+    sseEmitterService.broadcast({
+      type: 'sensor-reading',
+      payload: {
+        deviceId,
+        temperature: input.temperature,
+        humidity: input.humidity,
+        soilMoisture: input.soilMoisture,
+        lightLevel: input.lightLevel,
+        waterLevel: input.waterLevel,
+        recordedAt: recordedAt.toISOString(),
+      },
     });
 
     return { deviceId, recordedAt, deduplicated: false };

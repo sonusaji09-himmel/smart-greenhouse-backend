@@ -3,6 +3,8 @@ import { sensorRouter } from './sensor.routes';
 import { dashboardRouter } from './dashboard.routes';
 import { healthRouter } from './health.routes';
 import { authRouter } from './auth.routes';
+import { actuatorRouter } from './actuator.routes';
+import { alertRouter } from './alert.routes';
 
 /**
  * Aggregates every v1 router under one mount point.
@@ -16,5 +18,7 @@ v1Router.use('/health', healthRouter);
 v1Router.use('/auth', authRouter);
 v1Router.use('/sensors', sensorRouter);
 v1Router.use('/dashboard', dashboardRouter);
+v1Router.use('/actuators', actuatorRouter);
+v1Router.use('/alerts', alertRouter);
 
 export { v1Router };

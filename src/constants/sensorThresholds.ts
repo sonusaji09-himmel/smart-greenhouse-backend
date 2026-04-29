@@ -57,3 +57,27 @@ export const SENSOR_STATUS = {
 } as const;
 
 export type SensorStatus = (typeof SENSOR_STATUS)[keyof typeof SENSOR_STATUS];
+
+/**
+ * Control thresholds used by automation and manual-override validation.
+ */
+export const AUTOMATION_THRESHOLDS = {
+  pump: { startBelow: 50, stopAbove: 80 },
+  lights: { turnOnBelow: 1000, turnOffAbove: 5000 },
+  window: {
+    openWhen: { tempAbove: 24, humidityAbove: 80 },
+    closeWhen: { tempBelow: 15, humidityAbove: 60 },
+  },
+  waterTank: { minLevelPct: 5 },
+} as const;
+
+/**
+ * Sustained-condition thresholds for alert generation.
+ */
+export const ALERT_THRESHOLDS = {
+  humidity: { above: 90, durationHours: 5 },
+  temperature: { above: 30, durationHours: 5 },
+  soilDry: { below: 40, durationHours: 96 },
+  soilWet: { above: 80, durationHours: 96 },
+  darkness: { below: 1000, durationHours: 6 },
+} as const;

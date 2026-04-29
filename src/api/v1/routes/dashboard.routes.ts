@@ -18,6 +18,8 @@ router.get(
   dashboardController.getOverview,
 );
 
+router.get('/stream', authGuard, dashboardController.stream);
+
 openApiRegistry.registerPath({
   method: 'get',
   path: '/dashboard/overview',
@@ -34,6 +36,20 @@ openApiRegistry.registerPath({
     500: {
       description: 'Unexpected server error',
       content: { 'application/json': { schema: errorResponseSchema } },
+    },
+  },
+});
+
+openApiRegistry.registerPath({
+  method: 'get',
+  path: '/dashboard/stream',
+  tags: ['Dashboard'],
+  summary: 'Open dashboard realtime stream',
+  description:
+    'Opens a Server-Sent Events stream that emits sensor-reading events as new telemetry arrives.',
+  responses: {
+    200: {
+      description: 'SSE stream established',
     },
   },
 });

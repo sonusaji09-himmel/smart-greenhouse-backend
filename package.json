@@ -13,7 +13,7 @@
     "demo:infra": "docker compose up -d && wait-on http://localhost:8086/health -t 30000",
     "demo:simulate": "tsx scripts/simulate-esp32.ts",
     "demo:start": "npm run demo:infra && concurrently -n backend,simulator -c cyan,green \"npm run dev\" \"npm run demo:simulate\"",
-    "demo:stop": "docker compose down"
+    "demo:stop": "docker compose down -v"
   },
   "repository": {
     "type": "git",

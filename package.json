@@ -8,7 +8,12 @@
     "dev": "tsx watch src/server.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:setup": "node scripts/demo-setup.mjs",
+    "demo:infra": "docker compose up -d && wait-on http://localhost:8086/health -t 30000",
+    "demo:simulate": "tsx scripts/simulate-esp32.ts",
+    "demo:start": "npm run demo:infra && concurrently -n backend,simulator -c cyan,green \"npm run dev\" \"npm run demo:simulate\"",
+    "demo:stop": "docker compose down"
   },
   "repository": {
     "type": "git",
@@ -51,6 +56,7 @@
     "@types/swagger-ui-express": "^4.1.8",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.2",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
@@ -58,7 +64,8 @@
     "rimraf": "^6.1.3",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wait-on": "^9.0.10"
   },
   "engines": {
     "node": ">=20.0.0"

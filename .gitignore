@@ -48,10 +48,10 @@ Desktop.ini
 .parcel-cache/
 
 # ─── Terraform ───────────────────────────────────────────────────────────────
-infra/.terraform/
-infra/*.tfstate
-infra/*.tfstate.*
-infra/terraform.tfvars
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/terraform.tfvars
 infra/crash.log
 infra/override.tf
 infra/*_override.tf

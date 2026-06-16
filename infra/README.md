@@ -16,21 +16,40 @@ See also [ARCHITECTURE.md](../ARCHITECTURE.md) for the full data flow.
 
 | Tool | Notes |
 |------|-------|
-| [Terraform](https://developer.hashicorp.com/terraform/install) | >= 1.5 |
+| [Terraform](https://developer.hashicorp.com/terraform/install) | >= 1.10 (native S3 state locking) |
 | AWS CLI configured | `aws configure` or env vars |
 | EC2 key pair | Create in AWS console; set `key_name` in tfvars |
 | HiveMQ Cloud cluster | Same URL/credentials as your ESP32 |
 
 ---
 
-## Quick start
+## Remote state (S3)
+
+State is stored in S3 with native locking (no DynamoDB). The state bucket must
+exist **before** the main stack can use it, so it lives in a separate one-time
+module: `state-backend/`.
+
+```bash
+# 1. Create the state bucket ONCE (uses local state).
+cd infra/state-backend
+terraform init
+terraform apply        # creates S3 bucket "smart-greenhouse-tfstate"
+```
+
+S3 bucket names are **globally unique**. If `smart-greenhouse-tfstate` is taken,
+change `state_bucket_name` in `state-backend/variables.tf` **and** the matching
+`bucket` in `backend.tf` to the same new name.
+
+---
+
+## Quick start (main stack)
 
 ```bash
 cd infra
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars — key_name, mqtt_*, influx_*, jwt_secret
 
-terraform init
+terraform init        # initializes the S3 backend created above
 terraform plan
 terraform apply
 ```

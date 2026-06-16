@@ -39,11 +39,23 @@ const envSchema = z.object({
   MQTT_USERNAME: z.string().optional(),
   MQTT_PASSWORD: z.string().optional(),
   MQTT_TOPIC_PREFIX: z.string().min(1).default('greenhouse'),
-  /** Glob pattern the backend subscribes to. `+` is a single-level wildcard. */
-  MQTT_SUBSCRIBE_TOPIC: z.string().min(1).default('greenhouse/+/telemetry'),
+  /**
+   * Wildcard the backend subscribes to. Defaults to the ESP32 firmware's
+   * per-field string topics. `+` is a single-level wildcard.
+   */
+  MQTT_SUBSCRIBE_TOPIC: z.string().min(1).default('esp32s3/smartfarm/+'),
   MQTT_QOS: z.coerce.number().int().min(0).max(2).default(1),
   MQTT_RECONNECT_PERIOD_MS: z.coerce.number().int().nonnegative().default(5_000),
   MQTT_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+
+  // ── ESP32 telemetry ─────────────────────────────────────────────────────
+  // The firmware publishes one string per sensor on separate topics and the
+  // topic carries no device id, so we assign one here. Readings are combined
+  // after a short debounce window.
+  /** deviceId assigned to incoming ESP32 readings. */
+  ESP32_DEVICE_ID: z.string().min(1).default('esp32-01'),
+  /** Debounce window to group the burst of per-field messages into one write. */
+  ESP32_FLUSH_MS: z.coerce.number().int().positive().default(2_000),
 
   // ── Auth (JWT) ──────────────────────────────────────────────────────────
   AUTH_ENABLED: z

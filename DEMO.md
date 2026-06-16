@@ -51,7 +51,7 @@ npm run demo:stop
 | Node.js API | `npm run dev` | 8000 |
 | ESP32 simulator | `scripts/simulate-esp32.ts` | publishes to HiveMQ Cloud |
 
-Simulator cycles every **3 seconds**:
+Simulator cycles every **5 seconds**:
 
 1. **normal** — baseline readings  
 2. **dry-soil** — triggers auto pump (soil &lt; 50%)  
@@ -135,7 +135,7 @@ Invoke-WebRequest -Method POST "http://localhost:8000/api/v1/actuators/lights/ac
 Invoke-WebRequest -Method POST "http://localhost:8000/api/v1/actuators/window/activate?deviceId=esp32-01"
 ```
 
-Successful response includes `"success": true` and publishes to MQTT topic `greenhouse/esp32-01/commands`.
+Successful response includes `"success": true` and updates actuator state. (Note: the current ESP32 firmware does not subscribe to a command topic, so commands are not delivered to the device — the backend only tracks intended state.)
 
 ### Actuator state
 

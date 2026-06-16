@@ -1,8 +1,14 @@
 /**
  * ESP32 telemetry simulator for end-to-end demos.
  *
- * Publishes JSON readings to greenhouse/{deviceId}/telemetry every 3 seconds,
- * cycling scenarios that exercise automation (pump / lights / window).
+ * Mirrors the real firmware: publishes one human-readable string per sensor on
+ * separate topics every few seconds, cycling scenarios that exercise the
+ * dashboard status thresholds.
+ *
+ *   esp32s3/smartfarm/temp    → "Temperature    :24.50 °C"
+ *   esp32s3/smartfarm/light   → "Light Intensity    :60% (Raw ADC: 2048);"
+ *   esp32s3/smartfarm/moist1  → "Soil Moisture_1    :45% (Raw ADC: 2048);"
+ *   esp32s3/smartfarm/moist2  → "Soil Moisture_2    :50% (Raw ADC: 2048);"
  *
  * Run: npm run demo:simulate
  * Requires: HiveMQ Cloud credentials in .env (MQTT_URL, MQTT_USERNAME, MQTT_PASSWORD)
@@ -12,12 +18,11 @@ import mqtt from 'mqtt';
 
 dotenv.config();
 
-const DEVICE_ID = 'esp32-01';
-const TOPIC_PREFIX = process.env.MQTT_TOPIC_PREFIX ?? 'greenhouse';
+const TOPIC_PREFIX = 'esp32s3/smartfarm';
 const MQTT_URL = process.env.MQTT_URL ?? '';
 const MQTT_USERNAME = process.env.MQTT_USERNAME;
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
-const INTERVAL_MS = 3_000;
+const INTERVAL_MS = 5_000;
 
 if (!MQTT_URL || MQTT_URL.includes('your-cluster') || !MQTT_USERNAME || !MQTT_PASSWORD) {
   console.error(
@@ -29,54 +34,28 @@ if (!MQTT_URL || MQTT_URL.includes('your-cluster') || !MQTT_USERNAME || !MQTT_PA
 type Scenario = {
   name: string;
   temperature: number;
-  soilMoisture: number;
-  lightLevel: number;
-  waterLevel: number;
+  soil1: number;
+  soil2: number;
+  light: number;
 };
 
-/** Matches sensorReadingSchema + automation thresholds in sensorThresholds.ts */
+/** Light/soil are percentages; temperature in °C — matches firmware output. */
 const SCENARIOS: Scenario[] = [
-  {
-    name: 'normal',
-    temperature: 22,
-    soilMoisture: 55,
-    lightLevel: 60,
-    waterLevel: 80,
-  },
-  {
-    name: 'dry-soil (auto pump)',
-    temperature: 24,
-    soilMoisture: 22,
-    lightLevel: 60,
-    waterLevel: 75,
-  },
-  {
-    name: 'dark (auto lights)',
-    temperature: 21,
-    soilMoisture: 55,
-    lightLevel: 15,
-    waterLevel: 80,
-  },
-  {
-    name: 'hot (auto window)',
-    temperature: 29,
-    soilMoisture: 55,
-    lightLevel: 60,
-    waterLevel: 80,
-  },
+  { name: 'normal', temperature: 22, soil1: 55, soil2: 57, light: 60 },
+  { name: 'dry-soil', temperature: 24, soil1: 22, soil2: 26, light: 60 },
+  { name: 'dark', temperature: 21, soil1: 55, soil2: 53, light: 15 },
+  { name: 'hot', temperature: 29, soil1: 55, soil2: 57, light: 60 },
 ];
 
 let sequence = 0;
 
-const topic = `${TOPIC_PREFIX}/${DEVICE_ID}/telemetry`;
-
 console.log(`[esp32-sim] Connecting to ${MQTT_URL}`);
-console.log(`[esp32-sim] Publishing to ${topic} every ${INTERVAL_MS / 1000}s`);
+console.log(`[esp32-sim] Publishing to ${TOPIC_PREFIX}/{temp,light,moist1,moist2} every ${INTERVAL_MS / 1000}s`);
 console.log('[esp32-sim] Scenarios:', SCENARIOS.map((s) => s.name).join(' → '));
 console.log('[esp32-sim] Press Ctrl+C to stop\n');
 
 const client = mqtt.connect(MQTT_URL, {
-  clientId: `esp32-sim-${DEVICE_ID}`,
+  clientId: 'esp32-sim',
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
   clean: true,
@@ -92,32 +71,37 @@ client.on('connect', () => {
   setInterval(publishOnce, INTERVAL_MS);
 });
 
+const rawAdc = (pct: number): number => Math.round((pct / 100) * 4095);
+
 const publishOnce = (): void => {
   if (!client.connected) return;
 
   const scenario = SCENARIOS[sequence % SCENARIOS.length]!;
   sequence += 1;
 
-  const messageId = `${DEVICE_ID}-${String(sequence).padStart(6, '0')}`;
-  const payload = {
-    temperature: scenario.temperature,
-    soilMoisture: scenario.soilMoisture,
-    lightLevel: scenario.lightLevel,
-    waterLevel: scenario.waterLevel,
-    deviceId: DEVICE_ID,
-    messageId,
-    timestamp: new Date().toISOString(),
-  };
+  const messages: Array<[string, string]> = [
+    [`${TOPIC_PREFIX}/temp`, `Temperature    :${scenario.temperature.toFixed(2)} °C`],
+    [
+      `${TOPIC_PREFIX}/light`,
+      `Light Intensity    :${scenario.light}% (Raw ADC: ${rawAdc(scenario.light)});`,
+    ],
+    [
+      `${TOPIC_PREFIX}/moist1`,
+      `Soil Moisture_1    :${scenario.soil1}% (Raw ADC: ${rawAdc(scenario.soil1)});`,
+    ],
+    [
+      `${TOPIC_PREFIX}/moist2`,
+      `Soil Moisture_2    :${scenario.soil2}% (Raw ADC: ${rawAdc(scenario.soil2)});`,
+    ],
+  ];
 
-  client.publish(topic, JSON.stringify(payload), { qos: 1 }, (err) => {
-    if (err) {
-      console.error('[esp32-sim] Publish failed:', err.message);
-      return;
-    }
-    console.log(
-      `[esp32-sim] #${sequence} [${scenario.name}] temp=${scenario.temperature}°C soil=${scenario.soilMoisture}% light=${scenario.lightLevel}%`,
-    );
-  });
+  for (const [topic, message] of messages) {
+    client.publish(topic, message, { qos: 1 });
+  }
+
+  console.log(
+    `[esp32-sim] #${sequence} [${scenario.name}] temp=${scenario.temperature}°C soil=${scenario.soil1}/${scenario.soil2}% light=${scenario.light}%`,
+  );
 };
 
 process.on('SIGINT', () => {

@@ -46,14 +46,12 @@ flowchart TB
     Dashboard[React dashboard\nbrowser]
   end
 
-  ESP32 -->|"1. publish telemetry"| HiveMQ
+  ESP32 -->|"1. publish per-sensor strings"| HiveMQ
   HiveMQ -->|"2. backend subscribes"| Node
   Node -->|"3. write readings"| Influx
-  Node -->|"4. publish commands"| HiveMQ
-  HiveMQ -->|"5. ESP32 subscribes"| ESP32
-  Dashboard -->|"6. HTTPS REST / SSE"| Proxy
+  Dashboard -->|"4. HTTPS REST / SSE"| Proxy
   Proxy --> Node
-  Node -->|"7. read history"| Influx
+  Node -->|"5. read history"| Influx
 ```
 
 ---
@@ -66,7 +64,7 @@ flowchart TB
 
 Think of it like this:
 
-- **Topic** = mailbox name (e.g. `greenhouse/esp32-01/telemetry`)
+- **Topic** = mailbox name (e.g. `esp32s3/smartfarm/temp`)
 - **Publish** = put a letter in the mailbox
 - **Subscribe** = ask the post office to forward letters from that mailbox to you
 - **HiveMQ** = the post office
@@ -80,22 +78,9 @@ Think of it like this:
 Every few seconds the ESP32:
 
 1. Reads BMP280 temperature
-2. Reads two soil moisture sensors (firmware averages them into one value)
+2. Reads two soil moisture sensors (`moist1`, `moist2`)
 3. Reads LDR light sensor (0–100%)
-4. Builds a **JSON** object
-
-Example payload:
-
-```json
-{
-  "temperature": 24.5,
-  "soilMoisture": 45,
-  "lightLevel": 60,
-  "deviceId": "esp32-01",
-  "messageId": "esp32-01-000042",
-  "timestamp": "2026-06-16T10:30:00Z"
-}
-```
+4. Builds **one human-readable string per sensor** (no JSON)
 
 ### Step 2 — ESP32 publishes to HiveMQ
 
@@ -105,10 +90,14 @@ The ESP32 connects to HiveMQ Cloud:
 mqtts://your-cluster.s1.eu.hivemq.cloud:8883
 ```
 
-It **publishes** the JSON to this topic:
+It **publishes one string per sensor** to separate topics (the topic carries no
+device id):
 
 ```
-greenhouse/esp32-01/telemetry
+esp32s3/smartfarm/temp    → "Temperature    :24.50 °C"
+esp32s3/smartfarm/light   → "Light Intensity    :60% (Raw ADC: 2048);"
+esp32s3/smartfarm/moist1  → "Soil Moisture_1    :45% (Raw ADC: 2048);"
+esp32s3/smartfarm/moist2  → "Soil Moisture_2    :50% (Raw ADC: 2048);"
 ```
 
 - **QoS 1** = “at least once” delivery (broker retries if needed)
@@ -122,8 +111,8 @@ The ESP32 does **not** need EC2’s IP address. It only needs WiFi + HiveMQ cred
 When your Node backend starts on EC2, it:
 
 1. Connects to the **same** HiveMQ cluster (same URL and credentials in `.env`)
-2. Subscribes to: `greenhouse/+/telemetry`  
-   (`+` means “any device ID” — e.g. `esp32-01`, `esp32-02`)
+2. Subscribes to: `esp32s3/smartfarm/+`  
+   (`+` matches `temp`, `light`, `moist1`, `moist2`)
 3. Waits for messages
 
 Relevant config on EC2:
@@ -132,7 +121,9 @@ Relevant config on EC2:
 MQTT_URL=mqtts://your-cluster.s1.eu.hivemq.cloud:8883
 MQTT_USERNAME=your-hivemq-username
 MQTT_PASSWORD=your-hivemq-password
-MQTT_SUBSCRIBE_TOPIC=greenhouse/+/telemetry
+MQTT_SUBSCRIBE_TOPIC=esp32s3/smartfarm/+
+ESP32_DEVICE_ID=esp32-01
+ESP32_FLUSH_MS=2000
 ```
 
 Connection direction: **EC2 → HiveMQ** (outbound). You do **not** open MQTT ports on EC2’s firewall.
@@ -148,22 +139,20 @@ sequenceDiagram
   participant Backend
   participant InfluxDB
 
-  ESP32->>HiveMQ: publish greenhouse/esp32-01/telemetry
-  HiveMQ->>Backend: deliver message (QoS 1)
-  Backend->>Backend: validate JSON (Zod)
-  Backend->>InfluxDB: write sensor_reading point
+  ESP32->>HiveMQ: publish esp32s3/smartfarm/temp,light,moist1,moist2
+  HiveMQ->>Backend: deliver messages (QoS 1)
+  Backend->>Backend: parse number from each string + buffer per device
+  Backend->>Backend: after ESP32_FLUSH_MS, average moist1/moist2
+  Backend->>InfluxDB: write one sensor_reading point
   Backend->>Backend: run automation rules
-  opt command needed
-    Backend->>HiveMQ: publish greenhouse/esp32-01/commands
-    HiveMQ->>ESP32: deliver command
-  end
 ```
 
-1. Parse JSON
-2. Validate fields (`temperature`, `soilMoisture`, `lightLevel` — no humidity)
-3. Write to InfluxDB with tag `deviceId=esp32-01`
-4. Run automation (pump / lights / window thresholds)
-5. Broadcast to SSE clients (live dashboard updates)
+1. Parse the leading number from each per-sensor string
+2. Buffer fields per device, average `moist1`/`moist2` into `soilMoisture`
+3. Clamp values to valid ranges (`temperature`, `soilMoisture`, `lightLevel` — no humidity)
+4. Write to InfluxDB with tag `deviceId=esp32-01`
+5. Run automation (pump / lights / window thresholds)
+6. Broadcast to SSE clients (live dashboard updates)
 
 InfluxDB runs **on the same EC2 instance**, bound to localhost:
 
@@ -198,15 +187,17 @@ Response comes from **InfluxDB** (stored history), not by polling the ESP32.
 
 ## Commands: backend → ESP32
 
-Automation or manual API calls can send commands back to the device.
+> **Important — current firmware limitation.** The ESP32 firmware in use does
+> **not** subscribe to any command topic. It controls the window **locally** on
+> the device (`temperature > 27°C`). The backend's actuator API and automation
+> engine still run and track state, but those commands **cannot reach this
+> firmware**. To enable real remote actuation, the firmware must add an MQTT
+> subscribe handler and act on incoming command messages.
 
-**Topic (backend publishes, ESP32 subscribes):**
-
-```
-greenhouse/esp32-01/commands
-```
-
-**Example command JSON:**
+The backend's actuator state machine and automation still operate so the
+dashboard reflects intended state. If/when the firmware adds a subscribe
+handler, point it at a command topic and parse a simple payload (the shape below
+is a suggestion, not enforced):
 
 ```json
 {
@@ -307,7 +298,8 @@ INFLUX_BUCKET=greenhouse
 MQTT_URL=mqtts://your-cluster.s1.eu.hivemq.cloud:8883
 MQTT_USERNAME=<hivemq-user>
 MQTT_PASSWORD=<hivemq-password>
-MQTT_SUBSCRIBE_TOPIC=greenhouse/+/telemetry
+MQTT_SUBSCRIBE_TOPIC=esp32s3/smartfarm/+
+ESP32_DEVICE_ID=esp32-01
 
 AUTH_ENABLED=true
 JWT_SECRET=<long-random-string>
@@ -359,17 +351,21 @@ Prefix is configurable via `MQTT_TOPIC_PREFIX` (default: `greenhouse`).
 
 | Direction | Topic | Purpose |
 |-----------|-------|---------|
-| ESP32 → backend | `greenhouse/{deviceId}/telemetry` | Sensor readings (JSON) |
-| backend → ESP32 | `greenhouse/{deviceId}/commands` | Actuator commands (JSON) |
-| ESP32 → backend | `greenhouse/{deviceId}/status` | Online/offline (reserved, not wired yet) |
+| ESP32 → backend | `esp32s3/smartfarm/temp` | Temperature (string) |
+| ESP32 → backend | `esp32s3/smartfarm/light` | Light intensity (string) |
+| ESP32 → backend | `esp32s3/smartfarm/moist1` | Soil moisture 1 (string) |
+| ESP32 → backend | `esp32s3/smartfarm/moist2` | Soil moisture 2 (string) |
 
-Backend subscribes to: `greenhouse/+/telemetry`
+Backend subscribes to: `esp32s3/smartfarm/+`. Commands back to the device are
+not delivered (firmware does not subscribe — see the Commands section).
 
 ---
 
 ## Automation rules (current)
 
-After each reading is ingested, the backend may auto-send commands:
+After each reading is ingested, the backend evaluates these rules and updates
+actuator state (command delivery to the device requires firmware that subscribes
+— see the Commands section):
 
 | Actuator | Turn ON when | Turn OFF when |
 |----------|--------------|---------------|
@@ -410,8 +406,9 @@ Yes, but this project is set up for **HiveMQ Cloud (Option A)**. Self-hosting Mo
 ## Reliability checklist
 
 - [ ] ESP32 and backend use the **same** HiveMQ cluster and credentials
-- [ ] ESP32 publishes **JSON** to `greenhouse/{deviceId}/telemetry` (not separate string topics)
-- [ ] ESP32 subscribes to `greenhouse/{deviceId}/commands` for remote control
+- [ ] ESP32 publishes per-sensor strings to `esp32s3/smartfarm/*`
+- [ ] Backend `MQTT_SUBSCRIBE_TOPIC=esp32s3/smartfarm/+` and `ESP32_DEVICE_ID` set
+- [ ] (Optional) firmware adds an MQTT subscribe handler if remote commands are needed
 - [ ] InfluxDB on EC2 is **not** exposed to the internet
 - [ ] API is served over **HTTPS** (nginx/Caddy + Let’s Encrypt)
 - [ ] `AUTH_ENABLED=true` in production

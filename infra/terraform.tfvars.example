@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in real values. Do NOT commit terraform.tfvars.
+
+region       = "ap-south-1"
+project_name = "greenhouse-demo"
+key_name     = "your-ec2-keypair-name"
+
+# Restrict to your IP for demo: "203.0.113.10/32"
+allowed_cidr = "0.0.0.0/0"
+
+instance_type = "t3.small"
+
+# ─── Git (public repo cloned on boot) ────────────────────────────────────────
+git_repo   = "https://github.com/sonusaji09-himmel/smart-greenhouse-backend.git"
+git_branch = "main"
+
+# ─── HiveMQ Cloud (same cluster as ESP32) ────────────────────────────────────
+mqtt_url      = "mqtts://your-cluster.s1.eu.hivemq.cloud:8883"
+mqtt_username = "your-hivemq-username"
+mqtt_password = "your-hivemq-password"
+
+# ─── InfluxDB (initialized in Docker on the instance) ────────────────────────
+influx_org     = "greenhouse"
+influx_bucket  = "greenhouse"
+influx_token   = "replace-with-a-long-random-token"
+influx_password = "replace-with-strong-password"
+
+# ─── App ─────────────────────────────────────────────────────────────────────
+auth_enabled = false
+jwt_secret   = "replace-with-long-jwt-secret-min-16-chars"
+cors_origins = "*"

@@ -25,7 +25,8 @@ if (!existsSync(envFile)) {
 
 console.log('');
 console.log('Next steps:');
-console.log('  1. Start Docker Desktop (Windows) or ensure Docker is running');
-console.log('  2. npm run demo:start     # infra + backend + ESP32 simulator');
-console.log('  3. Open DEMO.md for verify queries and actuator POST examples');
+console.log('  1. Edit .env — set MQTT_URL, MQTT_USERNAME, MQTT_PASSWORD from HiveMQ Cloud console');
+console.log('  2. Start Docker Desktop (Windows) or ensure Docker is running');
+console.log('  3. npm run demo:start     # infra + backend + ESP32 simulator');
+console.log('  4. Open DEMO.md for verify queries and actuator POST examples');
 console.log('');

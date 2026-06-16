@@ -6,7 +6,6 @@ import type { SensorReadingInput } from '../validators/sensor.validator';
 interface AutomationReading {
   deviceId: string;
   temperature: number;
-  humidity: number;
   soilMoisture: number;
   lightLevel: number;
   waterLevel?: number;
@@ -28,15 +27,9 @@ const evaluateActions = (reading: AutomationReading): Array<Promise<void>> => {
     tasks.push(actuatorControlService.deactivate(reading.deviceId, 'lights', 'auto'));
   }
 
-  if (
-    reading.temperature > AUTOMATION_THRESHOLDS.window.openWhen.tempAbove &&
-    reading.humidity > AUTOMATION_THRESHOLDS.window.openWhen.humidityAbove
-  ) {
+  if (reading.temperature > AUTOMATION_THRESHOLDS.window.openAboveTemp) {
     tasks.push(actuatorControlService.activate(reading.deviceId, 'window', 'auto', reading));
-  } else if (
-    reading.temperature < AUTOMATION_THRESHOLDS.window.closeWhen.tempBelow &&
-    reading.humidity > AUTOMATION_THRESHOLDS.window.closeWhen.humidityAbove
-  ) {
+  } else if (reading.temperature < AUTOMATION_THRESHOLDS.window.closeBelowTemp) {
     tasks.push(actuatorControlService.deactivate(reading.deviceId, 'window', 'auto'));
   }
 
@@ -52,7 +45,6 @@ export const automationEngineService = {
     const reading: AutomationReading = {
       deviceId,
       temperature: input.temperature,
-      humidity: input.humidity,
       soilMoisture: input.soilMoisture,
       lightLevel: input.lightLevel,
       waterLevel: input.waterLevel,

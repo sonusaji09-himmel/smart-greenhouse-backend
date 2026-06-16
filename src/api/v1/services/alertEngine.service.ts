@@ -4,7 +4,7 @@ import { ALERT_THRESHOLDS } from '../../../constants/sensorThresholds';
 
 interface AlertCondition {
   key: string;
-  field: 'humidity' | 'temperature' | 'soilMoisture' | 'lightLevel';
+  field: 'temperature' | 'soilMoisture' | 'lightLevel';
   direction: 'above' | 'below';
   threshold: number;
   durationHours: number;
@@ -21,14 +21,6 @@ export interface ActiveAlert {
 const fluxStr = (value: string): string => JSON.stringify(value);
 
 const CONDITIONS: AlertCondition[] = [
-  {
-    key: 'humidity-high',
-    field: 'humidity',
-    direction: 'above',
-    threshold: ALERT_THRESHOLDS.humidity.above,
-    durationHours: ALERT_THRESHOLDS.humidity.durationHours,
-    message: `Humidity above ${ALERT_THRESHOLDS.humidity.above}% for ${ALERT_THRESHOLDS.humidity.durationHours}h`,
-  },
   {
     key: 'temperature-high',
     field: 'temperature',
@@ -59,7 +51,7 @@ const CONDITIONS: AlertCondition[] = [
     direction: 'below',
     threshold: ALERT_THRESHOLDS.darkness.below,
     durationHours: ALERT_THRESHOLDS.darkness.durationHours,
-    message: `Light below ${ALERT_THRESHOLDS.darkness.below} lux for ${ALERT_THRESHOLDS.darkness.durationHours}h`,
+    message: `Light below ${ALERT_THRESHOLDS.darkness.below}% for ${ALERT_THRESHOLDS.darkness.durationHours}h`,
   },
 ];
 

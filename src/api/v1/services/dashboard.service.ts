@@ -23,11 +23,6 @@ export const dashboardService = {
         unit: SENSOR_THRESHOLDS.temperature.unit,
         status: evaluateSensorStatus(latest.temperature, SENSOR_THRESHOLDS.temperature),
       },
-      humidity: {
-        value: latest.humidity,
-        unit: SENSOR_THRESHOLDS.humidity.unit,
-        status: evaluateSensorStatus(latest.humidity, SENSOR_THRESHOLDS.humidity),
-      },
       soilMoisture: {
         value: latest.soilMoisture,
         unit: SENSOR_THRESHOLDS.soilMoisture.unit,

@@ -25,13 +25,6 @@ export const SENSOR_THRESHOLDS = {
     max: 40,
     unit: '°C',
   },
-  humidity: {
-    min: 20,
-    optimalMin: 50,
-    optimalMax: 75,
-    max: 90,
-    unit: '%',
-  },
   soilMoisture: {
     min: 20,
     optimalMin: 40,
@@ -40,11 +33,11 @@ export const SENSOR_THRESHOLDS = {
     unit: '%',
   },
   light: {
-    min: 200,
-    optimalMin: 500,
-    optimalMax: 2000,
-    max: 5000,
-    unit: 'lux',
+    min: 5,
+    optimalMin: 30,
+    optimalMax: 80,
+    max: 100,
+    unit: '%',
   },
 } as const satisfies Record<string, SensorThreshold>;
 
@@ -63,11 +56,8 @@ export type SensorStatus = (typeof SENSOR_STATUS)[keyof typeof SENSOR_STATUS];
  */
 export const AUTOMATION_THRESHOLDS = {
   pump: { startBelow: 50, stopAbove: 80 },
-  lights: { turnOnBelow: 1000, turnOffAbove: 5000 },
-  window: {
-    openWhen: { tempAbove: 24, humidityAbove: 80 },
-    closeWhen: { tempBelow: 15, humidityAbove: 60 },
-  },
+  lights: { turnOnBelow: 30, turnOffAbove: 70 },
+  window: { openAboveTemp: 27, closeBelowTemp: 24 },
   waterTank: { minLevelPct: 5 },
 } as const;
 
@@ -75,9 +65,8 @@ export const AUTOMATION_THRESHOLDS = {
  * Sustained-condition thresholds for alert generation.
  */
 export const ALERT_THRESHOLDS = {
-  humidity: { above: 90, durationHours: 5 },
   temperature: { above: 30, durationHours: 5 },
   soilDry: { below: 40, durationHours: 96 },
   soilWet: { above: 80, durationHours: 96 },
-  darkness: { below: 1000, durationHours: 6 },
+  darkness: { below: 20, durationHours: 6 },
 } as const;

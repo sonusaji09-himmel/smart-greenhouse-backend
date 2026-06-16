@@ -32,16 +32,10 @@ const shouldBlockManualActivate = (
     return `Pump activate ignored: soil moisture is ${reading.soilMoisture}% (must be below ${AUTOMATION_THRESHOLDS.pump.startBelow}%)`;
   }
   if (actuator === 'lights' && reading.lightLevel >= AUTOMATION_THRESHOLDS.lights.turnOnBelow) {
-    return `Lights activate ignored: light level is ${reading.lightLevel} lux (must be below ${AUTOMATION_THRESHOLDS.lights.turnOnBelow} lux)`;
+    return `Lights activate ignored: light level is ${reading.lightLevel}% (must be below ${AUTOMATION_THRESHOLDS.lights.turnOnBelow}%)`;
   }
-  if (
-    actuator === 'window' &&
-    !(
-      reading.temperature > AUTOMATION_THRESHOLDS.window.openWhen.tempAbove &&
-      reading.humidity > AUTOMATION_THRESHOLDS.window.openWhen.humidityAbove
-    )
-  ) {
-    return `Window activate ignored: requires temperature > ${AUTOMATION_THRESHOLDS.window.openWhen.tempAbove}°C and humidity > ${AUTOMATION_THRESHOLDS.window.openWhen.humidityAbove}%`;
+  if (actuator === 'window' && reading.temperature <= AUTOMATION_THRESHOLDS.window.openAboveTemp) {
+    return `Window activate ignored: requires temperature > ${AUTOMATION_THRESHOLDS.window.openAboveTemp}°C`;
   }
 
   return null;

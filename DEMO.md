@@ -2,7 +2,7 @@
 
 Reproducible demo of the full pipeline:
 
-**ESP32 simulator → MQTT (Mosquitto) → Node.js backend → InfluxDB → REST API (actuator POST)**
+**ESP32 simulator → MQTT (HiveMQ Cloud) → Node.js backend → InfluxDB → REST API (actuator POST)**
 
 Works on **Windows** (cmd / PowerShell), **macOS**, and **Linux**. No WSL or Git Bash required.
 
@@ -12,10 +12,11 @@ Works on **Windows** (cmd / PowerShell), **macOS**, and **Linux**. No WSL or Git
 
 | Tool | Windows | macOS / Linux |
 |------|---------|---------------|
-| [Docker Desktop](https://docs.docker.com/desktop/) | Required (includes `docker compose`) | Docker Engine or Desktop |
+| [Docker Desktop](https://docs.docker.com/desktop/) | Required (InfluxDB only) | Docker Engine or Desktop |
 | [Node.js 20+](https://nodejs.org) | Required | Required |
+| [HiveMQ Cloud](https://www.hivemq.com/mqtt-cloud/) cluster | Required (free tier works) | Required |
 
-Ensure Docker is **running** before `npm run demo:start`.
+Ensure Docker is **running** before `npm run demo:start`. Set `MQTT_URL`, `MQTT_USERNAME`, and `MQTT_PASSWORD` in `.env` (copied from `.env.demo` via `npm run demo:setup`).
 
 ---
 
@@ -26,10 +27,11 @@ Open **cmd**, **PowerShell**, or a terminal in the project folder:
 ```bash
 npm install
 npm run demo:setup
+# Edit .env — set your HiveMQ Cloud URL and credentials
 npm run demo:start
 ```
 
-- **Terminal 1** runs: Docker (Mosquitto + InfluxDB) → waits for InfluxDB → backend + ESP32 simulator together.
+- **Terminal 1** runs: Docker (InfluxDB) → waits for InfluxDB → backend + ESP32 simulator together.
 - Leave it running; open a **second terminal** for actuator commands below.
 
 Stop everything: `Ctrl+C` in the demo terminal, then:
@@ -42,19 +44,19 @@ npm run demo:stop
 
 ## What runs where
 
-| Component | How | Port |
-|-----------|-----|------|
-| Mosquitto MQTT | `docker compose` | 1883 |
+| Component | How | Port / endpoint |
+|-----------|-----|-----------------|
+| HiveMQ Cloud MQTT | External broker (TLS) | `mqtts://…:8883` |
 | InfluxDB | `docker compose` | 8086 |
 | Node.js API | `npm run dev` | 8000 |
-| ESP32 simulator | `scripts/simulate-esp32.ts` | publishes to MQTT |
+| ESP32 simulator | `scripts/simulate-esp32.ts` | publishes to HiveMQ Cloud |
 
 Simulator cycles every **3 seconds**:
 
 1. **normal** — baseline readings  
 2. **dry-soil** — triggers auto pump (soil &lt; 50%)  
-3. **dark** — triggers auto lights (light &lt; 1000 lux)  
-4. **hot-humid** — triggers auto window (temp &gt; 24°C and humidity &gt; 80%)
+3. **dark** — triggers auto lights (light &lt; 30%)  
+4. **hot** — triggers auto window (temp &gt; 27°C)
 
 ---
 
@@ -96,7 +98,7 @@ from(bucket: "greenhouse")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
 ```
 
-You should see `temperature`, `humidity`, `soilMoisture`, `lightLevel` updating every few seconds.
+You should see `temperature`, `soilMoisture`, `lightLevel` updating every few seconds.
 
 ### 4. Swagger UI
 
@@ -113,8 +115,8 @@ Manual commands are validated against the **latest sensor reading**. Use the mat
 | Actuator | Manual POST works when… |
 |----------|-------------------------|
 | **pump** `activate` | soil moisture **&lt; 50%** (dry-soil scenario) |
-| **lights** `activate` | light **&lt; 1000 lux** (dark scenario) |
-| **window** `activate` | temp **&gt; 24°C** and humidity **&gt; 80%** (hot-humid scenario) |
+| **lights** `activate` | light **&lt; 30%** (dark scenario) |
+| **window** `activate` | temp **&gt; 27°C** (hot scenario) |
 
 ### curl (quote URLs on Windows cmd)
 
@@ -148,7 +150,7 @@ curl "http://localhost:8000/api/v1/actuators/state"
 | Script | Description |
 |--------|-------------|
 | `npm run demo:setup` | Copy `.env.demo` → `.env` (once) |
-| `npm run demo:infra` | Start Docker services; wait for InfluxDB |
+| `npm run demo:infra` | Start Docker (InfluxDB); wait for health |
 | `npm run demo:simulate` | ESP32 MQTT publisher only |
 | `npm run demo:start` | Infra + backend + simulator (full demo) |
 | `npm run demo:stop` | `docker compose down` |
@@ -175,11 +177,11 @@ npm run demo:simulate
 | Issue | Fix |
 |-------|-----|
 | `docker` not recognized | Install/start **Docker Desktop**; restart terminal |
-| Port 1883 / 8086 / 8000 in use | Stop other services or change ports in `docker-compose.yml` / `.env` |
+| Port 8086 / 8000 in use | Stop other services or change ports in `docker-compose.yml` / `.env` |
 | InfluxDB token errors | Run `npm run demo:stop`, delete volumes if needed: `docker compose down -v`, then `npm run demo:start` |
 | `curl` fails on cmd | Use double quotes around URLs; or use PowerShell `Invoke-WebRequest` |
 | Pump POST returns 409 | Wait for **dry-soil** scenario in simulator logs, then retry |
-| MQTT disconnected in health | Ensure Mosquitto container is up: `docker compose ps` |
+| MQTT disconnected in health | Check `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD` in `.env`; verify HiveMQ Cloud cluster is running and internet is available |
 
 ---
 
@@ -198,4 +200,4 @@ npm run demo:start
 
 ## Security note
 
-Demo Mosquitto allows **anonymous** connections and uses a **fixed** InfluxDB token. Use only on localhost for team demos — not in production.
+Demo uses a **fixed** InfluxDB token on localhost and connects to **HiveMQ Cloud** with credentials in `.env`. Do not commit real HiveMQ passwords. Use only for team demos — not in production without `AUTH_ENABLED=true` and strong secrets.

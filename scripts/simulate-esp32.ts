@@ -5,19 +5,30 @@
  * cycling scenarios that exercise automation (pump / lights / window).
  *
  * Run: npm run demo:simulate
- * Requires: Mosquitto on MQTT_URL (default mqtt://localhost:1883)
+ * Requires: HiveMQ Cloud credentials in .env (MQTT_URL, MQTT_USERNAME, MQTT_PASSWORD)
  */
+import dotenv from 'dotenv';
 import mqtt from 'mqtt';
+
+dotenv.config();
 
 const DEVICE_ID = 'esp32-01';
 const TOPIC_PREFIX = process.env.MQTT_TOPIC_PREFIX ?? 'greenhouse';
-const MQTT_URL = process.env.MQTT_URL ?? 'mqtt://localhost:1883';
+const MQTT_URL = process.env.MQTT_URL ?? '';
+const MQTT_USERNAME = process.env.MQTT_USERNAME;
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
 const INTERVAL_MS = 3_000;
+
+if (!MQTT_URL || MQTT_URL.includes('your-cluster') || !MQTT_USERNAME || !MQTT_PASSWORD) {
+  console.error(
+    '[esp32-sim] Missing HiveMQ config. Set MQTT_URL, MQTT_USERNAME, and MQTT_PASSWORD in .env',
+  );
+  process.exit(1);
+}
 
 type Scenario = {
   name: string;
   temperature: number;
-  humidity: number;
   soilMoisture: number;
   lightLevel: number;
   waterLevel: number;
@@ -28,33 +39,29 @@ const SCENARIOS: Scenario[] = [
   {
     name: 'normal',
     temperature: 22,
-    humidity: 62,
     soilMoisture: 55,
-    lightLevel: 2500,
+    lightLevel: 60,
     waterLevel: 80,
   },
   {
     name: 'dry-soil (auto pump)',
     temperature: 24,
-    humidity: 58,
     soilMoisture: 22,
-    lightLevel: 2500,
+    lightLevel: 60,
     waterLevel: 75,
   },
   {
     name: 'dark (auto lights)',
     temperature: 21,
-    humidity: 60,
     soilMoisture: 55,
-    lightLevel: 450,
+    lightLevel: 15,
     waterLevel: 80,
   },
   {
-    name: 'hot-humid (auto window)',
+    name: 'hot (auto window)',
     temperature: 29,
-    humidity: 85,
     soilMoisture: 55,
-    lightLevel: 2500,
+    lightLevel: 60,
     waterLevel: 80,
   },
 ];
@@ -70,6 +77,8 @@ console.log('[esp32-sim] Press Ctrl+C to stop\n');
 
 const client = mqtt.connect(MQTT_URL, {
   clientId: `esp32-sim-${DEVICE_ID}`,
+  username: MQTT_USERNAME,
+  password: MQTT_PASSWORD,
   clean: true,
   reconnectPeriod: 2_000,
 });
@@ -92,7 +101,6 @@ const publishOnce = (): void => {
   const messageId = `${DEVICE_ID}-${String(sequence).padStart(6, '0')}`;
   const payload = {
     temperature: scenario.temperature,
-    humidity: scenario.humidity,
     soilMoisture: scenario.soilMoisture,
     lightLevel: scenario.lightLevel,
     waterLevel: scenario.waterLevel,
@@ -107,7 +115,7 @@ const publishOnce = (): void => {
       return;
     }
     console.log(
-      `[esp32-sim] #${sequence} [${scenario.name}] temp=${scenario.temperature}°C humidity=${scenario.humidity}% soil=${scenario.soilMoisture}% light=${scenario.lightLevel} lux`,
+      `[esp32-sim] #${sequence} [${scenario.name}] temp=${scenario.temperature}°C soil=${scenario.soilMoisture}% light=${scenario.lightLevel}%`,
     );
   });
 };

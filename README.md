@@ -1,25 +1,44 @@
 # Smart Greenhouse — Real-Time IoT Backend
 
-A production-grade Node.js + Express + TypeScript backend that consumes telemetry from ESP32 devices over **MQTT**, persists it in **InfluxDB** as time-series data, and serves real-time + aggregated query APIs to a React frontend.
+A Node.js + Express + TypeScript backend for the Smart Greenhouse project. ESP32 devices publish telemetry over **MQTT**; the backend validates readings, stores them in **InfluxDB**, runs **automation rules** (pump, lights, window), exposes **manual actuator control** and **sustained alerts**, and serves real-time APIs (including **SSE**) to a React dashboard.
 
 ---
 
 ## Pipeline
 
 ```
-ESP32 ──publish──▶ MQTT broker ──subscribe──▶ Backend ──write──▶ InfluxDB
-                                                  │
-                          ┌───────────────────────┘
-                          ▼
-                     REST API (Express)
-                          │
-                          ▼
-                  React frontend (polls / SSE)
+ESP32 ──telemetry──▶ MQTT broker ──subscribe──▶ Backend ──write──▶ InfluxDB
+                         ▲                           │
+                         │                           ├── automation engine
+                         └── commands ◀──────────────├── actuator API (manual)
+                                                     ├── alert engine (Flux queries)
+                                                     └── REST API + SSE
+                                                              │
+                                                              ▼
+                                                     React dashboard (poll / SSE)
 ```
 
-- Each ESP32 publishes a JSON payload every ~5–30s to `greenhouse/{deviceId}/telemetry`.
-- The backend subscribes with QoS-1, validates the payload with Zod, and writes a point to InfluxDB.
-- The React dashboard hits `GET /dashboard/overview` every ~10s, and `GET /sensors/history` or `/aggregate` for charts.
+1. Device publishes JSON to `greenhouse/{deviceId}/telemetry` (QoS 1).
+2. Backend ingests → InfluxDB → evaluates automation → may publish to `greenhouse/{deviceId}/commands`.
+3. Dashboard uses `GET /dashboard/overview` (poll) or `GET /dashboard/stream` (SSE).
+4. Frontend calls actuator and alert endpoints for manual control and warnings.
+
+---
+
+## Features
+
+| Area | Description |
+| ---- | ----------- |
+| **Ingestion** | MQTT consumer + HTTP fallback; Zod validation; idempotent writes |
+| **Automation** | Pump, LED lights, motorized window from sensor thresholds (R1–R6) |
+| **Actuators** | Manual activate / deactivate / stop via REST → MQTT commands (R10–R12) |
+| **Manual safety** | Manual **activate** rejected when sensor limits not met (R13) |
+| **Empty tank** | Pump blocked when `waterLevel` ≤ 5% if field is present (R15) |
+| **Alerts** | Sustained critical conditions queried from Influx history (R14) |
+| **Dashboard API** | Latest readings with per-sensor optimal / warning / critical status (R8–R9 backend) |
+| **Realtime** | SSE broadcast on each new ingested reading |
+| **Auth** | Optional JWT on protected routes |
+| **Demo** | Docker (InfluxDB) + HiveMQ Cloud + ESP32 simulator — see [DEMO.md](./DEMO.md) |
 
 ---
 
@@ -37,223 +56,303 @@ ESP32 ──publish──▶ MQTT broker ──subscribe──▶ Backend ──
 | API Docs    | OpenAPI 3.1 via `@asteasolutions/zod-to-openapi` + Swagger UI |
 | Logging     | Winston + Morgan                                              |
 | Security    | Helmet, CORS allowlist, express-rate-limit, 1 MB body cap     |
-| Dev Tooling | tsx, ESLint (flat), Prettier, rimraf                          |
+| Dev Tooling | tsx, ESLint (flat), Prettier, rimraf, concurrently            |
 
 ---
 
 ## Architecture
 
-Strict MVC-style layering, organised by feature and API version so the project scales to many resources and devices.
+Strict MVC-style layering, organised by feature and API version.
 
 ```
 src/
-├── app.ts                               ← Express factory (middleware chain)
-├── server.ts                            ← Bootstrap: Influx → MQTT → HTTP → shutdown
+├── app.ts
+├── server.ts                            ← Influx → MQTT → HTTP → graceful shutdown
 ├── config/
-│   ├── env.ts                           ← Zod-validated env loader
-│   ├── influxdb.ts                      ← Influx client + write/query APIs
-│   ├── logger.ts                        ← Winston + morgan pipe
-│   └── openapi.ts                       ← OpenAPI registry + generator + bearerAuth scheme
+│   ├── env.ts
+│   ├── influxdb.ts
+│   ├── logger.ts
+│   └── openapi.ts
 ├── mqtt/
-│   ├── mqttClient.ts                    ← Resilient MQTT connection (auto-reconnect)
-│   ├── mqttConsumer.ts                  ← Subscribe → validate → ingest loop
-│   └── topics.ts                        ← Topic naming + deviceId parser
+│   ├── mqttClient.ts
+│   ├── mqttConsumer.ts
+│   └── topics.ts
 ├── middlewares/
-│   ├── auth.middleware.ts               ← JWT guard (bypassed if AUTH_ENABLED=false)
-│   ├── errorHandler.middleware.ts       ← Global error → ErrorEnvelope JSON
-│   ├── notFound.middleware.ts           ← 404 → AppError
-│   ├── requestLogger.middleware.ts      ← morgan → winston
-│   └── validate.middleware.ts           ← Zod request validator factory
+│   ├── auth.middleware.ts
+│   ├── errorHandler.middleware.ts
+│   ├── notFound.middleware.ts
+│   ├── requestLogger.middleware.ts
+│   └── validate.middleware.ts
 ├── constants/
-│   └── sensorThresholds.ts              ← Sensor ranges, units, status literals
+│   └── sensorThresholds.ts              ← status, automation, alert thresholds
 ├── utils/
 │   ├── ApiResponse.ts
 │   ├── AppError.ts
 │   └── asyncHandler.ts
-└── api/
-    └── v1/
-        ├── controllers/                 ← HTTP I/O only
-        │   ├── auth.controller.ts
-        │   ├── sensor.controller.ts
-        │   └── dashboard.controller.ts
-        ├── services/                    ← All business logic lives here
-        │   ├── auth.service.ts
-        │   ├── sensorIngestion.service.ts   (Influx writes, idempotent)
-        │   ├── sensorQuery.service.ts       (Flux queries, aggregations)
-        │   ├── sensorStatus.service.ts      (pure threshold mapper)
-        │   └── dashboard.service.ts
-        ├── validators/                  ← Zod schemas (double as OpenAPI source)
-        │   ├── zodOpenApi.ts
-        │   ├── common.validator.ts
-        │   ├── auth.validator.ts
-        │   ├── sensor.validator.ts
-        │   └── dashboard.validator.ts
-        └── routes/                      ← Route wiring + OpenAPI registration
-            ├── index.ts
-            ├── health.routes.ts
-            ├── auth.routes.ts
-            ├── sensor.routes.ts
-            └── dashboard.routes.ts
+└── api/v1/
+    ├── controllers/
+    │   ├── auth.controller.ts
+    │   ├── sensor.controller.ts
+    │   ├── dashboard.controller.ts
+    │   ├── actuator.controller.ts
+    │   └── alert.controller.ts
+    ├── services/
+    │   ├── auth.service.ts
+    │   ├── sensorIngestion.service.ts
+    │   ├── sensorQuery.service.ts
+    │   ├── sensorStatus.service.ts
+    │   ├── dashboard.service.ts
+    │   ├── automationEngine.service.ts
+    │   ├── actuatorControl.service.ts
+    │   ├── alertEngine.service.ts
+    │   └── sseEmitter.service.ts
+    ├── validators/
+    └── routes/
+        ├── health.routes.ts
+        ├── auth.routes.ts
+        ├── sensor.routes.ts
+        ├── dashboard.routes.ts
+        ├── actuator.routes.ts
+        └── alert.routes.ts
 ```
 
 ### Separation of concerns
 
-- **Controllers** only deal with the HTTP cycle.
-- **Services** own all business logic. They are the only layer that may talk to InfluxDB.
-- **Validators** are Zod schemas that back request validation *and* OpenAPI generation — one source of truth.
-- **MQTT module** runs as a side-process inside the Node runtime; the MQTT consumer shares the same `sensorIngestionService` as the HTTP fallback endpoint, so both paths land exactly one code path into InfluxDB.
-- **Config** encapsulates env, logger, Influx client, and OpenAPI registry.
+- **Controllers** — HTTP I/O only.
+- **Services** — business logic; Influx reads/writes, automation, alerts, MQTT commands.
+- **Validators** — Zod schemas shared with OpenAPI generation.
+- **MQTT** — consumer and command publisher share ingestion and actuator services.
+- **Thresholds** — `src/constants/sensorThresholds.ts` (structured for future DB-backed settings).
 
-### API versioning
-
-All routes mount under `${API_PREFIX}/${API_VERSION}` (default `/api/v1`). A `v2` is a new `src/api/v2/...` tree + one line in the bootstrap — no existing code changes.
+All routes mount under `${API_PREFIX}/${API_VERSION}` (default `/api/v1`).
 
 ---
 
 ## MQTT Contract
 
-**Subscribe topic (backend):** `greenhouse/+/telemetry` — wildcard matches any device.
-**Publish topic (ESP32):** `greenhouse/{deviceId}/telemetry` with QoS 1.
+### Topics
 
-**Payload (JSON):**
+| Direction | Topic | Purpose |
+| --------- | ----- | ------- |
+| Device → backend | `greenhouse/{deviceId}/telemetry` | Sensor readings |
+| Backend → device | `greenhouse/{deviceId}/commands` | Actuator commands |
+| Device → backend | `greenhouse/{deviceId}/status` | Online/LWT (reserved; not wired yet) |
+
+Prefix is configurable via `MQTT_TOPIC_PREFIX`. Backend subscribes to `greenhouse/+/telemetry`.
+
+### Telemetry payload (JSON)
 
 ```json
 {
   "temperature": 24.5,
-  "humidity": 62.0,
   "soilMoisture": 38.0,
-  "lightLevel": 850.0,
+  "lightLevel": 60.0,
+  "waterLevel": 75.0,
   "timestamp": "2026-04-20T10:30:00Z",
   "deviceId": "esp32-01",
   "messageId": "esp32-01-00017345"
 }
 ```
 
-- `deviceId` may be omitted — the backend infers it from the topic.
-- `timestamp` is optional; if missing, server time is used.
-- `messageId` is optional but recommended — it short-circuits duplicate redeliveries.
+- `deviceId` may be omitted — inferred from the topic.
+- `timestamp` optional — server time used if missing.
+- `messageId` optional — deduplicates redeliveries (60 s in-process cache).
+- `waterLevel` optional — tank level (%); used for pump safety (R15).
 
-### Reliability & idempotency
+### Command payload (backend → device)
 
-- The MQTT client keeps `clean: false` so QoS-1 messages survive brief disconnects and are redelivered after reconnect.
-- `reconnectPeriod` + `resubscribe` handle broker flaps automatically; each state change is logged.
-- Influx deduplicates on `(measurement, tag-set, timestamp)`, so redelivered points collapse to a single row.
-- An in-process LRU cache of `deviceId::messageId` (60 s TTL) additionally drops immediate retransmits before they hit the network.
-- All message failures (bad JSON, failed validation, write error) are logged with context but **never crash the consumer** — the pipeline keeps draining.
+Published on manual or automatic actuation:
+
+```json
+{
+  "actuator": "pump",
+  "action": "activate",
+  "source": "auto",
+  "timestamp": "2026-04-20T10:30:05.000Z"
+}
+```
+
+`actuator`: `pump` | `lights` | `window`  
+`action`: `activate` | `deactivate` | `stop`  
+`source`: `manual` | `auto`
+
+### Reliability
+
+- QoS 1, persistent session, auto-resubscribe on reconnect.
+- Influx deduplicates on `(measurement, tags, timestamp)`.
+- Per-message validation failures are logged; the consumer keeps running.
 
 ---
 
 ## InfluxDB Schema
 
 ```
-measurement: sensor_reading     (configurable via INFLUX_MEASUREMENT)
+measurement: sensor_reading     (INFLUX_MEASUREMENT)
 tags:
   - deviceId
 fields:
   - temperature   (float, °C)
-  - humidity      (float, %)
   - soilMoisture  (float, %)
-  - lightLevel    (float, lux)
+  - lightLevel    (float, %)
+  - waterLevel    (float, %, optional)
 timestamp: reading time (ISO-8601 → ns)
 ```
 
-Because `deviceId` is a tag (indexed), queries-per-device are O(log n). Writes are batched (200 points / 1 s flush) to sustain multi-device high-frequency publishing.
+Writes are batched (200 points / 1 s flush). `deviceId` as a tag keeps per-device queries efficient.
 
 ---
 
-## Setup
+## Automation & Control
+
+Thresholds are defined in `src/constants/sensorThresholds.ts` (`AUTOMATION_THRESHOLDS`). After each ingested reading, `automationEngine.service.ts` may send MQTT commands.
+
+| Actuator | Activate (auto) | Deactivate (auto) |
+| -------- | ----------------- | ----------------- |
+| **Pump** | soil moisture &lt; 50% | soil moisture &gt; 80% |
+| **Lights** | light &lt; 30% | light &gt; 70% |
+| **Window** | temp &gt; 27°C | temp &lt; 24°C |
+
+**Manual control (R10–R12):** `POST /actuators/{pump|lights|window}/activate|deactivate|stop?deviceId=...`
+
+**Manual activate safety (R13):** activate is rejected with HTTP 409 if limits are not met (e.g. pump only when soil &lt; 50%).
+
+**Empty tank (R15):** pump activate rejected when `waterLevel` ≤ 5%.
+
+**Manual override:** auto commands are skipped for 2 minutes after a manual command on the same actuator.
+
+---
+
+## Sustained Alerts (R14)
+
+`GET /alerts` evaluates historical data in InfluxDB (not single readings). An alert fires only if the condition held for the full window:
+
+| Key | Condition | Duration |
+| --- | --------- | -------- |
+| `temperature-high` | temperature &gt; 30°C | 5 hours |
+| `soil-dry` | soil moisture &lt; 40% | 96 hours (4 days) |
+| `soil-wet` | soil moisture &gt; 80% | 96 hours (4 days) |
+| `darkness` | light &lt; 20% | 6 hours |
+
+Short demos often return `count: 0` until enough bad data exists in Influx. See [DEMO.md](./DEMO.md) for the full stack; alert backfill is optional for presentations.
+
+---
+
+## Quick Start (Demo)
+
+Requires **Docker**, **Node.js 20+**, and a **HiveMQ Cloud** cluster.
+
+```bash
+npm install
+npm run demo:setup    # copies .env.demo → .env (once)
+# Edit .env — set MQTT_URL, MQTT_USERNAME, MQTT_PASSWORD
+npm run demo:start    # InfluxDB + backend + ESP32 simulator (HiveMQ Cloud)
+```
+
+- API: [http://localhost:8000](http://localhost:8000)
+- Swagger: [http://localhost:8000/api-docs](http://localhost:8000/api-docs)
+- Influx UI: [http://localhost:8086](http://localhost:8086) (admin / greenhouse123 in demo)
+
+Stop: `Ctrl+C` then `npm run demo:stop`.
+
+Full walkthrough, actuator curl examples, and troubleshooting: **[DEMO.md](./DEMO.md)**.
+
+---
+
+## Setup (without demo)
 
 ### Prerequisites
 
 - Node.js ≥ 20, npm ≥ 10
-- An MQTT broker (e.g. `mosquitto`, HiveMQ, EMQX)
-- InfluxDB 2.x running with a bucket and token
+- HiveMQ Cloud cluster (or any MQTT 3.1.1 broker with TLS)
+- InfluxDB 2.x with bucket and token
 
 ### Install & configure
 
 ```bash
 npm install
 cp .env.example .env
-# Fill in INFLUX_TOKEN, MQTT credentials, etc.
+# Set INFLUX_TOKEN, MQTT_URL, etc.
 ```
 
-### Run locally
+### Run
 
 ```bash
-# Dev (auto-reload)
-npm run dev
-
-# Prod
-npm run build
-npm start
+npm run dev          # development (tsx watch)
+npm run build && npm start   # production
 ```
 
-API: `http://localhost:8000`
-Swagger UI: `http://localhost:8000/api-docs`
+---
 
-### Scripts
+## Scripts
 
-| Command             | Purpose                                  |
-| ------------------- | ---------------------------------------- |
-| `npm run dev`       | Start with `tsx watch` (auto-reload)     |
-| `npm run build`     | Compile TypeScript to `dist/`            |
-| `npm start`         | Run the compiled app                     |
-| `npm run typecheck` | `tsc --noEmit`                           |
-| `npm run lint`      | ESLint flat config                       |
-| `npm run format`    | Prettier                                 |
+| Command | Purpose |
+| ------- | ------- |
+| `npm run dev` | Start with auto-reload |
+| `npm run build` | Compile to `dist/` |
+| `npm start` | Run compiled app |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint |
+| `npm run format` | Prettier |
+| `npm run demo:setup` | Copy demo `.env` |
+| `npm run demo:infra` | Start Docker (InfluxDB) |
+| `npm run demo:simulate` | ESP32 MQTT simulator only |
+| `npm run demo:start` | Full demo (infra + backend + simulator) |
+| `npm run demo:stop` | Stop Docker stack |
 
 ---
 
 ## Configuration
 
-All configuration is loaded via `dotenv` and validated with Zod at startup — invalid values cause a clear fail-fast error.
+Loaded via `dotenv` and validated with Zod at startup.
 
 ### Application
 
-| Variable               | Default         | Description                                |
-| ---------------------- | --------------- | ------------------------------------------ |
-| `NODE_ENV`             | `development`   | `development` / `test` / `production`      |
-| `PORT`                 | `8000`          | HTTP port                                  |
-| `API_PREFIX`           | `/api`          | Base path prefix                           |
-| `API_VERSION`          | `v1`            | Version segment                            |
-| `CORS_ORIGINS`         | localhost:3000,5173 | Comma-separated allowlist              |
-| `LOG_LEVEL`            | `info`          | `error` / `warn` / `info` / `http` / `debug` |
-| `RATE_LIMIT_WINDOW_MS` | `60000`         | Rate-limit window                          |
-| `RATE_LIMIT_MAX`       | `120`           | Max requests per window per IP             |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `NODE_ENV` | `development` | `development` / `test` / `production` |
+| `PORT` | `8000` | HTTP port |
+| `API_PREFIX` | `/api` | Base path |
+| `API_VERSION` | `v1` | Version segment |
+| `CORS_ORIGINS` | localhost:3000,5173 | Comma-separated allowlist |
+| `LOG_LEVEL` | `info` | Winston level |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window |
+| `RATE_LIMIT_MAX` | `120` | Max requests per IP per window |
 
 ### InfluxDB
 
-| Variable             | Default                  | Description                          |
-| -------------------- | ------------------------ | ------------------------------------ |
-| `INFLUX_URL`         | `http://localhost:8086`  | InfluxDB v2 HTTP URL                 |
-| `INFLUX_TOKEN`       | —                        | **Required.** Write+read token       |
-| `INFLUX_ORG`         | —                        | **Required.** Organisation name      |
-| `INFLUX_BUCKET`      | `greenhouse`             | Bucket for sensor data               |
-| `INFLUX_MEASUREMENT` | `sensor_reading`         | Measurement name                     |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `INFLUX_URL` | `http://localhost:8086` | InfluxDB v2 URL |
+| `INFLUX_TOKEN` | — | **Required** write+read token |
+| `INFLUX_ORG` | — | **Required** organisation |
+| `INFLUX_BUCKET` | `greenhouse` | Bucket name |
+| `INFLUX_MEASUREMENT` | `sensor_reading` | Measurement name |
 
 ### MQTT
 
-| Variable                   | Default                       | Description                                  |
-| -------------------------- | ----------------------------- | -------------------------------------------- |
-| `MQTT_URL`                 | `mqtt://localhost:1883`       | Broker URL (`mqtt://`, `mqtts://`, `ws://`)  |
-| `MQTT_CLIENT_ID`           | `smart-greenhouse-backend`    | Unique client id                             |
-| `MQTT_USERNAME`            | —                             | Optional                                     |
-| `MQTT_PASSWORD`            | —                             | Optional                                     |
-| `MQTT_TOPIC_PREFIX`        | `greenhouse`                  | Topic namespace                              |
-| `MQTT_SUBSCRIBE_TOPIC`     | `greenhouse/+/telemetry`      | Backend subscription pattern                 |
-| `MQTT_QOS`                 | `1`                           | 0 / 1 / 2                                    |
-| `MQTT_RECONNECT_PERIOD_MS` | `5000`                        | Auto-reconnect cadence                       |
-| `MQTT_CONNECT_TIMEOUT_MS`  | `15000`                       | Initial connect timeout                      |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `MQTT_URL` | `mqtts://…:8883` | Broker URL (`mqtts://` for HiveMQ Cloud TLS) |
+| `MQTT_CLIENT_ID` | `smart-greenhouse-backend` | Client id |
+| `MQTT_USERNAME` | — | Broker username (required for HiveMQ Cloud) |
+| `MQTT_PASSWORD` | — | Broker password (required for HiveMQ Cloud) |
+| `MQTT_TOPIC_PREFIX` | `greenhouse` | Topic namespace |
+| `MQTT_SUBSCRIBE_TOPIC` | `greenhouse/+/telemetry` | Subscribe pattern |
+| `MQTT_QOS` | `1` | 0 / 1 / 2 |
+| `MQTT_RECONNECT_PERIOD_MS` | `5000` | Reconnect interval |
+| `MQTT_CONNECT_TIMEOUT_MS` | `15000` | Connect timeout |
 
 ### Auth
 
-| Variable         | Default                    | Description                                     |
-| ---------------- | -------------------------- | ----------------------------------------------- |
-| `AUTH_ENABLED`   | `false`                    | Enforce JWT on read endpoints                   |
-| `JWT_SECRET`     | —                          | ≥ 16 chars. Change in production                |
-| `JWT_EXPIRES_IN` | `1d`                       | `jsonwebtoken` duration string                  |
-| `ADMIN_EMAIL`    | `admin@greenhouse.local`   | Seed admin account for `/auth/login`            |
-| `ADMIN_PASSWORD` | `ChangeMe123!`             | Seed admin password (hashed in memory at boot)  |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `AUTH_ENABLED` | `false` | Require JWT on guarded routes |
+| `JWT_SECRET` | — | ≥ 16 characters in production |
+| `JWT_EXPIRES_IN` | `1d` | Token lifetime |
+| `ADMIN_EMAIL` | `admin@greenhouse.local` | Seed admin |
+| `ADMIN_PASSWORD` | `ChangeMe123!` | Seed password |
+
+When `AUTH_ENABLED=true`, send `Authorization: Bearer <jwt>` on guarded endpoints. Demo uses `AUTH_ENABLED=false`.
 
 ---
 
@@ -261,24 +360,25 @@ All configuration is loaded via `dotenv` and validated with Zod at startup — i
 
 Base URL: `http://localhost:8000/api/v1`
 
-| Method | Endpoint               | Auth  | Description                                         |
-| ------ | ---------------------- | ----- | --------------------------------------------------- |
-| GET    | `/health`              | —     | Liveness + Influx + MQTT status                     |
-| POST   | `/auth/login`          | —     | Exchange email/password for a JWT                   |
-| POST   | `/sensors/data`        | —     | HTTP fallback ingestion (primary path is MQTT)      |
-| GET    | `/sensors/latest`      | opt.  | Most recent reading (optionally per `deviceId`)     |
-| GET    | `/sensors/history`     | opt.  | Raw points in a time range (`from/to` or `window`)  |
-| GET    | `/sensors/aggregate`   | opt.  | Windowed `mean/min/max/median/sum/last`             |
-| GET    | `/dashboard/overview`  | opt.  | Latest reading with per-sensor status               |
+| Method | Endpoint | Auth | Description |
+| ------ | -------- | ---- | ----------- |
+| GET | `/health` | — | Liveness; Influx + MQTT status |
+| POST | `/auth/login` | — | JWT from email/password |
+| POST | `/sensors/data` | — | HTTP ingestion fallback |
+| GET | `/sensors/latest` | opt. | Latest reading (`deviceId` optional) |
+| GET | `/sensors/history` | opt. | Raw points (`from`/`to` or `window`) |
+| GET | `/sensors/aggregate` | opt. | Windowed mean/min/max/median/sum/last |
+| GET | `/dashboard/overview` | opt. | Latest values + per-sensor status |
+| GET | `/dashboard/stream` | opt. | SSE stream of new readings |
+| GET | `/actuators/state` | opt. | Last known actuator states |
+| POST | `/actuators/{pump\|lights\|window}/activate` | opt. | Manual/auto activate → MQTT |
+| POST | `/actuators/{pump\|lights\|window}/deactivate` | opt. | Deactivate → MQTT |
+| POST | `/actuators/{pump\|lights\|window}/stop` | opt. | Stop (hold position) → MQTT |
+| GET | `/alerts` | opt. | Active sustained-threshold alerts |
 
-**Auth** is enforced on marked endpoints only when `AUTH_ENABLED=true`. Send `Authorization: Bearer <jwt>`.
+**Auth:** `authGuard` on marked routes when `AUTH_ENABLED=true`.
 
-### Swagger UI
-
-- Interactive docs: [`/api-docs`](http://localhost:8000/api-docs)
-- Raw OpenAPI 3.1 JSON: [`/api-docs.json`](http://localhost:8000/api-docs.json)
-
-The spec is auto-generated from the same Zod schemas that validate requests, so docs can never drift.
+**Swagger:** [`/api-docs`](http://localhost:8000/api-docs) · OpenAPI JSON: [`/api-docs.json`](http://localhost:8000/api-docs.json)
 
 ---
 
@@ -289,8 +389,8 @@ The spec is auto-generated from the same Zod schemas that validate requests, so 
 ```json
 {
   "success": true,
-  "message": "Optional human-readable context",
-  "data": { /* endpoint-specific payload */ }
+  "message": "Optional context",
+  "data": {}
 }
 ```
 
@@ -302,114 +402,140 @@ The spec is auto-generated from the same Zod schemas that validate requests, so 
   "message": "Request validation failed",
   "code": "VALIDATION_ERROR",
   "statusCode": 400,
-  "details": [
-    { "path": "query.window", "message": "window must look like 30s / 15m / 1h / 7d", "code": "invalid_string" }
-  ]
+  "details": [{ "path": "query.window", "message": "...", "code": "invalid_string" }]
 }
 ```
+
+Manual actuator activate may return **409** when safety rules block the command.
 
 ---
 
 ## Example Requests
 
-### 1 — Publish from an ESP32 (simulated with `mosquitto_pub`)
+Publish via any MQTT client connected to HiveMQ Cloud:
 
 ```bash
-mosquitto_pub -h localhost -p 1883 -q 1 \
+# Example (replace host/credentials with your HiveMQ cluster)
+mosquitto_pub -h your-cluster.s1.eu.hivemq.cloud -p 8883 --capath /etc/ssl/certs/ \
+  -u your-username -P your-password -q 1 \
   -t "greenhouse/esp32-01/telemetry" \
-  -m '{"temperature":24.5,"humidity":62,"soilMoisture":38,"lightLevel":850,"messageId":"m-0001"}'
+  -m '{"temperature":24.5,"soilMoisture":38,"lightLevel":60,"waterLevel":75,"messageId":"m-0001"}'
 ```
 
-The backend logs `MQTT message ingested` and the point is flushed to InfluxDB within ~1 s.
-
-### 2 — HTTP ingestion fallback
+### HTTP ingestion
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/sensors/data \
   -H "Content-Type: application/json" \
-  -d '{"temperature":24.5,"humidity":62,"soilMoisture":38,"lightLevel":850,"deviceId":"esp32-01"}'
+  -d '{"temperature":24.5,"soilMoisture":38,"lightLevel":60,"deviceId":"esp32-01"}'
 ```
 
-### 3 — Latest reading
-
-```bash
-curl "http://localhost:8000/api/v1/sensors/latest?deviceId=esp32-01"
-```
-
-### 4 — 24-hour history
-
-```bash
-curl "http://localhost:8000/api/v1/sensors/history?deviceId=esp32-01&window=24h&limit=500"
-```
-
-### 5 — Hourly averages for the last day
-
-```bash
-curl "http://localhost:8000/api/v1/sensors/aggregate?deviceId=esp32-01&window=24h&every=1h&fn=mean"
-```
-
-### 6 — Dashboard overview
+### Dashboard overview
 
 ```bash
 curl "http://localhost:8000/api/v1/dashboard/overview?deviceId=esp32-01"
 ```
 
-```json
-{
-  "success": true,
-  "data": {
-    "deviceId": "esp32-01",
-    "temperature":  { "value": 24.5, "unit": "°C",  "status": "optimal" },
-    "humidity":     { "value": 62,   "unit": "%",   "status": "optimal" },
-    "soilMoisture": { "value": 38,   "unit": "%",   "status": "warning" },
-    "light":        { "value": 850,  "unit": "lux", "status": "optimal" },
-    "lastUpdated":  "2026-04-20T10:30:00.000Z"
-  }
-}
+### Dashboard SSE (browser / curl)
+
+```bash
+curl -N "http://localhost:8000/api/v1/dashboard/stream"
 ```
 
-### 7 — Authenticate (when `AUTH_ENABLED=true`)
+### Actuator control
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/actuators/pump/activate?deviceId=esp32-01"
+curl -X POST "http://localhost:8000/api/v1/actuators/lights/deactivate?deviceId=esp32-01"
+curl -X POST "http://localhost:8000/api/v1/actuators/window/stop?deviceId=esp32-01"
+curl "http://localhost:8000/api/v1/actuators/state"
+```
+
+### Alerts
+
+```bash
+curl "http://localhost:8000/api/v1/alerts?deviceId=esp32-01"
+```
+
+### History & aggregate
+
+```bash
+curl "http://localhost:8000/api/v1/sensors/history?deviceId=esp32-01&window=24h&limit=500"
+curl "http://localhost:8000/api/v1/sensors/aggregate?deviceId=esp32-01&window=24h&every=1h&fn=mean"
+```
+
+### Auth (when enabled)
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@greenhouse.local","password":"ChangeMe123!"}'
-
-# → use the returned token:
-curl -H "Authorization: Bearer <jwt>" \
-     "http://localhost:8000/api/v1/sensors/latest"
 ```
 
 ---
 
 ## Threshold Reference
 
-| Sensor        | Unit | Critical Low | Warning Low | Optimal Range | Warning High | Critical High |
-| ------------- | ---- | ------------ | ----------- | ------------- | ------------ | ------------- |
-| Temperature   | °C   | < 10         | 10 – 18     | 18 – 28       | 28 – 40      | > 40          |
-| Humidity      | %    | < 20         | 20 – 50     | 50 – 75       | 75 – 90      | > 90          |
-| Soil Moisture | %    | < 20         | 20 – 40     | 40 – 70       | 70 – 90      | > 90          |
-| Light         | lux  | < 200        | 200 – 500   | 500 – 2000    | 2000 – 5000  | > 5000        |
+### Dashboard sensor status
 
-Thresholds live in `src/constants/sensorThresholds.ts` and are consumed by `sensorStatus.service.ts`. They can be moved behind a DB-backed settings service later without touching controllers.
+Used by `sensorStatus.service.ts` for optimal / warning / critical on each tile.
+
+| Sensor | Unit | Critical Low | Warning Low | Optimal | Warning High | Critical High |
+| ------ | ---- | -------------- | ----------- | ------- | -------------- | ------------- |
+| Temperature | °C | &lt; 10 | 10–18 | 18–28 | 28–40 | &gt; 40 |
+| Soil moisture | % | &lt; 20 | 20–40 | 40–70 | 70–90 | &gt; 90 |
+| Light | % | &lt; 5 | 5–30 | 30–80 | 80–100 | &gt; 100 |
+
+### Automation (actuator control)
+
+| Rule | Threshold |
+| ---- | --------- |
+| Pump on | soil &lt; 50% |
+| Pump off | soil &gt; 80% |
+| Lights on | light &lt; 30% |
+| Lights off | light &gt; 70% |
+| Window open | temp &gt; 27°C |
+| Window close | temp &lt; 24°C |
+| Tank block pump | `waterLevel` ≤ 5% |
+
+All defined in `src/constants/sensorThresholds.ts`.
 
 ---
 
-## Scalability & Production Notes
+## Scalability & Production
 
-- **Multiple devices** — the subscribe pattern `greenhouse/+/telemetry` handles any number of devices; tag-based Influx schema keeps per-device queries fast.
-- **High-frequency ingest** — write batching (200 points / 1 s, retries with backoff) pushes the throughput ceiling into the thousands of points/sec on a single node.
-- **Horizontal scaling** — MQTT is pub-sub, so several backend replicas can run behind a load balancer; assign each its own `MQTT_CLIENT_ID` and make the topic shared (broker-dependent: e.g. MQTT 5 shared subscriptions `$share/group/greenhouse/+/telemetry`).
-- **Reliability** — MQTT session persistence + Influx retry + in-memory idempotency cache together give at-least-once delivery with exactly-once observable state.
-- **Observability** — Winston JSON logs in prod; every MQTT state change, write batch, and subscription is logged for triage.
-- **Graceful shutdown** — SIGINT/SIGTERM drains HTTP, unsubscribes MQTT, flushes pending writes, closes Influx — all within a hard 10 s ceiling.
+- **Multiple devices** — `greenhouse/+/telemetry` wildcard; `deviceId` tag in Influx.
+- **Write batching** — 200 points / 1 s with retries.
+- **Horizontal scaling** — multiple backend instances need distinct `MQTT_CLIENT_ID`; consider MQTT 5 shared subscriptions for ingest.
+- **Observability** — structured Winston logs; MQTT and write events logged.
+- **Graceful shutdown** — SIGINT/SIGTERM drains HTTP, unsubscribes MQTT, flushes Influx (10 s cap).
+
+Demo stack uses a fixed InfluxDB token on localhost and HiveMQ Cloud credentials in `.env` — not for production without `AUTH_ENABLED=true` and strong secrets.
+
+---
+
+## Production (EC2 + HiveMQ Cloud)
+
+Recommended layout:
+
+- **HiveMQ Cloud** — MQTT broker (ESP32 + backend both connect via `mqtts://…:8883`)
+- **EC2** — Node.js backend + InfluxDB (Influx bound to `127.0.0.1:8086`, never public)
+- **Security group** — inbound `22` (your IP), `443` (API via nginx/Caddy); do **not** open `1883` or `8086`
+- **`.env` on EC2** — `NODE_ENV=production`, `INFLUX_URL=http://127.0.0.1:8086`, `MQTT_URL=mqtts://…:8883`, `AUTH_ENABLED=true`, strong `JWT_SECRET`, `CORS_ORIGINS=<dashboard URL>`
+- **Process management** — PM2/systemd for Node; Docker for InfluxDB with EBS-backed volume
 
 ---
 
 ## Roadmap
 
-- Server-Sent Events stream (`GET /sensors/stream`) for zero-poll dashboards
-- `POST /devices/commands` (backend → `greenhouse/{id}/commands`)
-- Device LWT / status topic wiring
-- Alerts history endpoint + webhook sink
-- Automated tests (Vitest + Supertest + Testcontainers for broker & Influx)
+- [ ] Device online/offline via MQTT `status` / LWT topic
+- [ ] Alert history, clear state, and notification webhooks
+- [ ] Automated tests (Vitest + Supertest + Testcontainers)
+- [ ] Frontend dashboard integration (separate React repo; consumes APIs documented here)
+
+---
+
+## Related docs
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — system flow, HiveMQ, EC2, ESP32, and data retrieval explained with diagrams
+- **[DEMO.md](./DEMO.md)** — end-to-end demo, simulator scenarios, actuator timing, troubleshooting

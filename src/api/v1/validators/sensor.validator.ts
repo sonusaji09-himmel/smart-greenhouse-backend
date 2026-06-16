@@ -16,8 +16,6 @@ export const sensorReadingSchema = z
       .max(100, 'Temperature must be between -50 and 100 °C')
       .openapi({ example: 24.5, description: 'Air temperature in °C' }),
 
-    humidity: percentageSchema.openapi({ example: 62, description: 'Relative air humidity (%)' }),
-
     soilMoisture: percentageSchema.openapi({
       example: 38,
       description: 'Volumetric soil moisture (%)',
@@ -25,9 +23,9 @@ export const sensorReadingSchema = z
 
     lightLevel: z
       .number({ message: 'Light level is required' })
-      .min(0, 'Light level must be between 0 and 100,000 lux')
-      .max(100_000, 'Light level must be between 0 and 100,000 lux')
-      .openapi({ example: 850, description: 'Ambient light in lux' }),
+      .min(0, 'Light level must be between 0 and 100%')
+      .max(100, 'Light level must be between 0 and 100%')
+      .openapi({ example: 60, description: 'Ambient light intensity (%)' }),
 
     waterLevel: percentageSchema
       .optional()
@@ -135,9 +133,8 @@ const sensorReadingPointSchema = z
   .object({
     deviceId: z.string().openapi({ example: 'esp32-01' }),
     temperature: z.number().openapi({ example: 24.5 }),
-    humidity: z.number().openapi({ example: 62 }),
     soilMoisture: z.number().openapi({ example: 38 }),
-    lightLevel: z.number().openapi({ example: 850 }),
+    lightLevel: z.number().openapi({ example: 60 }),
     waterLevel: z.number().optional().openapi({ example: 75 }),
     recordedAt: z.string().datetime({ offset: true }),
   })
@@ -164,7 +161,6 @@ const aggregateBucketSchema = z
   .object({
     time: z.string().datetime({ offset: true }),
     temperature: z.number().nullable(),
-    humidity: z.number().nullable(),
     soilMoisture: z.number().nullable(),
     lightLevel: z.number().nullable(),
     waterLevel: z.number().nullable().optional(),

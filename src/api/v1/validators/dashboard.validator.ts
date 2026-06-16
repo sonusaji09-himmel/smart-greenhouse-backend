@@ -22,7 +22,6 @@ export const dashboardOverviewSchema = z
   .object({
     deviceId: z.string().openapi({ example: 'esp32-01' }),
     temperature: sensorSummarySchema,
-    humidity: sensorSummarySchema,
     soilMoisture: sensorSummarySchema,
     light: sensorSummarySchema,
     lastUpdated: z.string().datetime({ offset: true }),

@@ -67,7 +67,6 @@ export const sensorIngestionService = {
     const point = new Point(env.INFLUX_MEASUREMENT)
       .tag('deviceId', deviceId)
       .floatField('temperature', input.temperature)
-      .floatField('humidity', input.humidity)
       .floatField('soilMoisture', input.soilMoisture)
       .floatField('lightLevel', input.lightLevel)
       .timestamp(recordedAt);
@@ -90,7 +89,6 @@ export const sensorIngestionService = {
       payload: {
         deviceId,
         temperature: input.temperature,
-        humidity: input.humidity,
         soilMoisture: input.soilMoisture,
         lightLevel: input.lightLevel,
         waterLevel: input.waterLevel,

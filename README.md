@@ -529,6 +529,14 @@ Recommended layout:
 - **`.env` on EC2** — `NODE_ENV=production`, `INFLUX_URL=http://127.0.0.1:8086`, `MQTT_URL=mqtts://…:8883`, `AUTH_ENABLED=true`, strong `JWT_SECRET`, `CORS_ORIGINS=<dashboard URL>`
 - **Process management** — PM2/systemd for Node; Docker for InfluxDB with EBS-backed volume
 
+This layout is automated with **Terraform** in [`infra/`](./infra/) (VPC + EC2 +
+security group, bootstrapped via `user_data`, with Terraform state stored
+remotely in **S3**). See [infra/README.md](./infra/README.md).
+
+> Remote actuator commands require firmware that subscribes to a command topic.
+> The current ESP32 firmware only publishes telemetry, so backend commands update
+> state but are not delivered to the device.
+
 ---
 
 ## Roadmap

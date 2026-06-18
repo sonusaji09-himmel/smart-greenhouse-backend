@@ -4,7 +4,11 @@ Provisions a **single EC2 instance** in a **public subnet** (public IP, no NAT) 
 
 - **InfluxDB** in Docker on `127.0.0.1:8086`
 - **Node.js backend** on port **80**, cloned from GitHub on first boot
-- Outbound connection to **HiveMQ Cloud** for ESP32 telemetry and actuator commands
+- Outbound connection to **HiveMQ Cloud** for ESP32 telemetry (the backend also
+  publishes actuator commands, but the current ESP32 firmware only publishes and
+  does not subscribe — commands update backend state only)
+
+Terraform state is stored remotely in **S3** (see [Remote state](#remote-state-s3)).
 
 After `terraform apply`, use the printed `health_url` to confirm `mqtt: connected` and `influxdb: connected`.
 
@@ -81,12 +85,17 @@ curl "$(terraform output -raw health_url)"
 curl "$(terraform output -raw api_base_url)/sensors/latest?deviceId=esp32-01"
 ```
 
-### Control ESP32 actuators (HTTP → MQTT → device)
+### Actuator API (backend state only)
 
 ```bash
 curl -X POST "$(terraform output -raw api_base_url)/actuators/window/activate?deviceId=esp32-01"
 curl -X POST "$(terraform output -raw api_base_url)/actuators/pump/deactivate?deviceId=esp32-01"
 ```
+
+> These update the backend's actuator state and publish an MQTT command, but the
+> current ESP32 firmware does not subscribe to a command topic, so nothing
+> reaches the device. The firmware would need an MQTT subscribe handler for real
+> remote control.
 
 ---
 
@@ -94,7 +103,7 @@ curl -X POST "$(terraform output -raw api_base_url)/actuators/pump/deactivate?de
 
 ```mermaid
 flowchart LR
-  subgraph aws [AWS ap-south-1]
+  subgraph aws [AWS eu-central-1]
     VPC[VPC 10.0.0.0/16]
     Subnet[Public subnet]
   EC2[EC2 t3.small]
@@ -120,7 +129,7 @@ flowchart LR
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `region` | `ap-south-1` | AWS region |
+| `region` | `eu-central-1` | AWS region (Frankfurt) |
 | `instance_type` | `t3.small` | EC2 size |
 | `key_name` | — | SSH key pair (required) |
 | `allowed_cidr` | `0.0.0.0/0` | Who can reach :22 and :80 |
@@ -171,7 +180,18 @@ sudo journalctl -u greenhouse -f
 terraform destroy
 ```
 
-Removes VPC, EC2, security group. InfluxDB data on the instance is destroyed with the VM (no persistent EBS beyond root volume).
+Removes everything in the main stack: VPC, public subnet, IGW, route tables,
+security group, and the EC2 instance. InfluxDB data is destroyed with the VM
+(it lives on the encrypted root volume; no separate EBS).
+
+**Survives `destroy`** (by design):
+
+- The **S3 state bucket** — it's owned by the separate `state-backend/` module,
+  not this stack, and has `prevent_destroy = true`. Re-applying later reuses it.
+- The **EC2 key pair** — created manually in the console, not by Terraform.
+
+To also remove the state bucket, empty it and run `terraform destroy` inside
+`state-backend/` (you must first remove the `prevent_destroy` lifecycle rule).
 
 ---
 

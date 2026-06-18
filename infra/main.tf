@@ -46,7 +46,7 @@ module "security_group" {
   version = "~> 5.0"
 
   name        = "${var.project_name}-sg"
-  description = "Greenhouse demo — HTTP API and SSH"
+  description = "Greenhouse demo - HTTP API and SSH"
   vpc_id      = module.vpc.vpc_id
 
   ingress_with_cidr_blocks = [

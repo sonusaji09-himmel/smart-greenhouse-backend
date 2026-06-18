@@ -2,7 +2,7 @@
 # Smart Greenhouse EC2 bootstrap — rendered by Terraform templatefile()
 set -euo pipefail
 exec > /var/log/greenhouse-bootstrap.log 2>&1
-echo "=== Greenhouse bootstrap started at $$(date -Is) ==="
+echo "=== Greenhouse bootstrap started at $(date -Is) ==="
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -49,7 +49,7 @@ docker run -d \
   influxdb:2
 
 echo "Waiting for InfluxDB..."
-for i in $$(seq 1 60); do
+for i in $(seq 1 60); do
   if curl -sf http://127.0.0.1:8086/health >/dev/null 2>&1; then
     echo "InfluxDB is up"
     break
@@ -128,5 +128,5 @@ systemctl daemon-reload
 systemctl enable greenhouse
 systemctl restart greenhouse
 
-echo "=== Greenhouse bootstrap finished at $$(date -Is) ==="
-echo "API: http://$$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo localhost)/api/v1/health"
+echo "=== Greenhouse bootstrap finished at $(date -Is) ==="
+echo "API: http://$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo localhost)/api/v1/health"

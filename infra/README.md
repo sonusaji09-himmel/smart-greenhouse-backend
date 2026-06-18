@@ -33,10 +33,10 @@ module: `state-backend/`.
 # 1. Create the state bucket ONCE (uses local state).
 cd infra/state-backend
 terraform init
-terraform apply        # creates S3 bucket "smart-greenhouse-tfstate"
+terraform apply        # creates S3 bucket "smart-greenhouse-sonu-tfstate"
 ```
 
-S3 bucket names are **globally unique**. If `smart-greenhouse-tfstate` is taken,
+S3 bucket names are **globally unique**. If `smart-greenhouse-sonu-tfstate` is taken,
 change `state_bucket_name` in `state-backend/variables.tf` **and** the matching
 `bucket` in `backend.tf` to the same new name.
 

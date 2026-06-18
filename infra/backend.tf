@@ -3,7 +3,7 @@
 # change it in BOTH places (backend blocks cannot use variables).
 terraform {
   backend "s3" {
-    bucket       = "smart-greenhouse-tfstate"
+    bucket       = "smart-greenhouse-sonu-tfstate"
     key          = "greenhouse/terraform.tfstate"
     region       = "eu-central-1"
     encrypt      = true

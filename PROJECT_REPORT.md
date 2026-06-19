@@ -9,12 +9,6 @@ data, evaluates rules, and serves it to a **dashboard** for live monitoring.
 
 The project was built by a small team:
 
-| Area | Owner |
-|------|-------|
-| **Backend + Integration** | **Me (this report)** |
-| ESP32 firmware (hardware + sensors) | Teammate |
-| Frontend dashboard (React) | Teammate |
-
 This report focuses on **my part: the backend service and the end-to-end
 integration** that connects the hardware, the message broker, the database, and
 the API.

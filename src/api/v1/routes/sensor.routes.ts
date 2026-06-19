@@ -49,7 +49,7 @@ openApiRegistry.registerPath({
   tags: ['Sensors'],
   summary: 'Ingest a sensor reading (HTTP fallback)',
   description:
-    'Secondary ingestion endpoint. In production, devices should publish to MQTT topic `greenhouse/{deviceId}/telemetry`; the backend subscribes and writes the same data into InfluxDB.',
+    'Secondary ingestion endpoint. In production, the ESP32 publishes per-sensor strings to `esp32s3/smartfarm/*`; the backend subscribes, parses, combines, and writes the same data into InfluxDB. This HTTP endpoint is a JSON fallback for testing or other clients.',
   request: {
     body: {
       required: true,

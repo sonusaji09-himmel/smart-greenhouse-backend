@@ -2,26 +2,32 @@
 
 A Node.js + Express + TypeScript backend for the Smart Greenhouse project. ESP32 devices publish telemetry over **MQTT**; the backend validates readings, stores them in **InfluxDB**, runs **automation rules** (pump, lights, window), exposes **manual actuator control** and **sustained alerts**, and serves real-time APIs (including **SSE**) to a React dashboard.
 
+> **Project context.** This repository is the **backend + integration** component of
+> the Smart Greenhouse system. The **ESP32 firmware** and the **React dashboard**
+> are separate components maintained by other teammates. The backend is
+> deliberately aligned to the existing ESP32 message format (see [MQTT Contract](#mqtt-contract)).
+
 ---
 
 ## Pipeline
 
 ```
-ESP32 ──telemetry──▶ MQTT broker ──subscribe──▶ Backend ──write──▶ InfluxDB
-                         ▲                           │
-                         │                           ├── automation engine
-                         └── commands ◀──────────────├── actuator API (manual)
-                                                     ├── alert engine (Flux queries)
-                                                     └── REST API + SSE
-                                                              │
-                                                              ▼
-                                                     React dashboard (poll / SSE)
+ESP32 ──per-sensor strings──▶ MQTT broker ──subscribe──▶ Backend ──write──▶ InfluxDB
+                                  ⋮ (not received)            │
+                                  ✗ commands ◀────────────────├── automation engine
+                                                              ├── actuator API (manual)
+                                                              ├── alert engine (Flux queries)
+                                                              └── REST API + SSE
+                                                                       │
+                                                                       ▼
+                                                              React dashboard (poll / SSE)
 ```
 
 1. Device publishes per-sensor strings to `esp32s3/smartfarm/*` (QoS 1).
-2. Backend parses + combines them → InfluxDB → evaluates automation (commands cannot reach the current firmware; see MQTT Contract).
-3. Dashboard uses `GET /dashboard/overview` (poll) or `GET /dashboard/stream` (SSE).
-4. Frontend calls actuator and alert endpoints for manual control and warnings.
+2. Backend parses + combines them → InfluxDB → evaluates automation.
+3. The backend publishes actuator commands to MQTT, but the **current ESP32 firmware does not subscribe**, so they are not delivered to the device (see [MQTT Contract](#mqtt-contract)).
+4. Dashboard uses `GET /dashboard/overview` (poll) or `GET /dashboard/stream` (SSE).
+5. Frontend calls actuator and alert endpoints for manual control and warnings.
 
 ---
 
@@ -31,7 +37,7 @@ ESP32 ──telemetry──▶ MQTT broker ──subscribe──▶ Backend ─�
 | ---- | ----------- |
 | **Ingestion** | MQTT consumer + HTTP fallback; Zod validation; idempotent writes |
 | **Automation** | Pump, LED lights, motorized window from sensor thresholds (R1–R6) |
-| **Actuators** | Manual activate / deactivate / stop via REST → MQTT commands (R10–R12) |
+| **Actuators** | Manual activate / deactivate / stop via REST → MQTT commands (R10–R12); backend tracks state (current firmware does not subscribe, so commands are not delivered) |
 | **Manual safety** | Manual **activate** rejected when sensor limits not met (R13) |
 | **Empty tank** | Pump blocked when `waterLevel` ≤ 5% if field is present (R15) |
 | **Alerts** | Sustained critical conditions queried from Influx history (R14) |
@@ -164,11 +170,18 @@ How the backend processes them:
 
 ### Commands (backend → device)
 
+The backend publishes JSON commands to `${MQTT_TOPIC_PREFIX}/{deviceId}/commands`
+(default `greenhouse/{deviceId}/commands`):
+
+```json
+{ "actuator": "pump", "action": "activate", "source": "auto", "timestamp": "2026-06-19T10:30:05.000Z" }
+```
+
 > The current ESP32 firmware does **not** subscribe to any command topic — the
 > window is controlled locally on the device (`temperature > 27°C`). The backend
 > actuator API and automation still track state, but commands cannot reach this
 > firmware. Remote actuator control requires the firmware to add an MQTT
-> subscribe handler.
+> subscribe handler on the command topic above.
 
 ### Reliability
 

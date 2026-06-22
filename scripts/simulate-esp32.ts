@@ -55,7 +55,8 @@ console.log('[esp32-sim] Scenarios:', SCENARIOS.map((s) => s.name).join(' → ')
 console.log('[esp32-sim] Press Ctrl+C to stop\n');
 
 const client = mqtt.connect(MQTT_URL, {
-  clientId: 'esp32-sim',
+  // Unique per-process id so two simulators (or a real device) don't collide.
+  clientId: `esp32-sim-${process.pid.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
   username: MQTT_USERNAME,
   password: MQTT_PASSWORD,
   clean: true,

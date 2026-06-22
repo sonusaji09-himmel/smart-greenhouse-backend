@@ -19,20 +19,28 @@ let client: MqttClient | null = null;
 export const connectMqtt = async (): Promise<MqttClient> => {
   if (client) return client;
 
+  // MQTT brokers allow only one live connection per clientId. Append a unique
+  // per-process suffix so this instance never collides with another client
+  // using the same base id (e.g. a deployed backend on the same broker),
+  // which would otherwise cause both to repeatedly kick each other offline.
+  const uniqueClientId = `${env.MQTT_CLIENT_ID}-${process.pid.toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
   const options: IClientOptions = {
-    clientId: env.MQTT_CLIENT_ID,
+    clientId: uniqueClientId,
     username: env.MQTT_USERNAME,
     password: env.MQTT_PASSWORD,
     reconnectPeriod: env.MQTT_RECONNECT_PERIOD_MS,
     connectTimeout: env.MQTT_CONNECT_TIMEOUT_MS,
     // Persistent session so QoS-1 messages queued by the broker are
-    // redelivered after a reconnect.
+    // redelivered after a reconnect within this process lifetime.
     clean: false,
     keepalive: 30,
     resubscribe: true,
   };
 
-  logger.info(`MQTT connecting → ${env.MQTT_URL} (clientId=${env.MQTT_CLIENT_ID})`);
+  logger.info(`MQTT connecting → ${env.MQTT_URL} (clientId=${uniqueClientId})`);
   const instance = mqtt.connect(env.MQTT_URL, options);
 
   instance.on('connect', (packet) => {
